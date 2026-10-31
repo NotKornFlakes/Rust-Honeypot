@@ -31,6 +31,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use chrono::NaiveDate;
 
+use crate::deploy::{RateLimit, current_minute};
 use crate::log_files::{DailyLog, screen_line, today};
 use crate::visit::{Outcome, Visit, append_visit, outcome_of_error};
 
@@ -369,6 +370,7 @@ pub struct Shared {
     log: Arc<Mutex<CappedLog>>,
     screen: SyncSender<String>,
     time_limit: Duration,
+    rate: Option<Arc<Mutex<RateLimit>>>,
 }
 
 // This is a worked example, not an exercise. Printing can get stuck, for example if the
@@ -402,7 +404,21 @@ impl Shared {
             log: Arc::new(Mutex::new(log)),
             screen: start_screen_thread()?,
             time_limit,
+            rate: None,
         })
+    }
+
+    /// Turns on the limit on visits per minute from Stage 5.
+    pub fn with_rate_limit(mut self, rate: RateLimit) -> Shared {
+        self.rate = Some(Arc::new(Mutex::new(rate)));
+        self
+    }
+
+    fn over_rate_limit(&self, ip: IpAddr) -> bool {
+        match &self.rate {
+            Some(rate) => !lock(rate).allow(ip, current_minute()),
+            None => false,
+        }
     }
 
     fn show(&self, line: String) {
@@ -440,9 +456,14 @@ fn write_to_log(visit: &Visit, shared: &Shared) -> io::Result<bool> {
 
 // This is a worked example, not an exercise. It's everything one thread does for one
 // visitor. Refused connections are only counted, not logged one by one, so that they
-// can't use up the day's budget and push out the visits you want to study. A flood of
-// quick visits still could, which is what the rate limit in Stage 6 is for.
+// can't use up the day's budget and push out the visits you want to study. The rate limit
+// from Stage 5 does the same for floods of quick visits.
 pub fn handle_visit(stream: &TcpStream, ip: IpAddr, shared: &Shared) {
+    if shared.over_rate_limit(ip) {
+        shared.note_refused();
+        return;
+    }
+
     let mut visit = Visit::new(SystemTime::now(), ip);
     run_visit(&mut visit, stream, shared.time_limit);
 
