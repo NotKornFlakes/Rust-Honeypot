@@ -65,13 +65,16 @@ pub enum Outcome {
 ///
 /// `source_ip` is an `IpAddr` rather than a `String`, so it can only ever hold a real
 /// IP address. `serde` writes it to JSON as text like `"127.0.0.1"`.
+///
+/// `pub(crate)` means other files in this library can use these fields, but `main.rs`
+/// can't. Stage 3 needs them to decide what's safe to show on screen.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Visit {
-    time: u64,
-    source_ip: IpAddr,
-    outcome: Outcome,
-    username: Option<String>,
-    password: Option<String>,
+    pub(crate) time: u64,
+    pub(crate) source_ip: IpAddr,
+    pub(crate) outcome: Outcome,
+    pub(crate) username: Option<String>,
+    pub(crate) password: Option<String>,
 }
 
 // ---------------------------------------------------------------------------

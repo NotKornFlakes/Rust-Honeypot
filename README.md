@@ -43,14 +43,19 @@ These apply to every stage. If a change would break one of them, don't make it.
 
 When you're stuck, ask Claude for a hint or a review rather than the answer.
 
-## Trying it after Stage 2
+## Trying it after Stage 3
 
 1. Start it with `cargo run`.
 2. In a second terminal, connect with `nc 127.0.0.1 2323`.
 3. Type a made-up username and password. It will always say `Login incorrect`.
 4. Connect again, and press Ctrl+C without typing anything.
-5. See what it recorded in the first terminal and in `logs/visits.jsonl`.
-6. To read the log more easily, run `jq . logs/visits.jsonl`.
+5. Look at the first terminal: the password and most of the IP address are hidden.
+6. See the full record in the log with `jq . logs/visits-*.jsonl`.
+7. Stop the program, run `chmod 644 logs/visits-*.jsonl`, and start it again. It
+   refuses to run. Put it back with `chmod 600 logs/visits-*.jsonl`.
+
+Log files older than `KEEP_DAYS` (30 days, set in `src/log_files.rs`) are deleted
+for good. Only files named exactly like `visits-2026-10-31.jsonl` are ever deleted.
 
 ## Roadmap
 
@@ -60,8 +65,10 @@ When you're stuck, ask Claude for a hint or a review rather than the answer.
       the time and source IP, for every visitor, including those who leave without
       typing. Adding crates, `serde` and `serde_json`, `Option`, handling a `Result`
       yourself, `if let`
-- [ ] **Stage 3: Protecting the logs**: checking file permissions, a new file each
-      day, deleting old logs automatically, hiding passwords and IPs on screen
+- [ ] **Stage 3: Protecting the logs** (`src/log_files.rs`): checking file
+      permissions, a new file each day, deleting old logs automatically, hiding
+      passwords and IPs on screen. Bit masks, making your own errors, `chrono`, `?` on
+      an `Option`, enums that hold data
 - [ ] **Stage 4: Many connections at once**: threads, a cap on connections so
       nobody can overwhelm it, `Arc` and `Mutex`
 - [ ] **Stage 5: A fake web login**: reading simple HTTP requests by hand, fixed
