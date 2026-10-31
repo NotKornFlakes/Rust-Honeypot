@@ -1,0 +1,6 @@
+/target
+
+# Logs hold IP addresses and passwords people try. Never commit them.
+/logs/
+*.log
+*.jsonl
