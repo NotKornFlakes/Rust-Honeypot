@@ -92,7 +92,10 @@ pub struct Visit {
 ///   and `Err(_)`.
 /// - `.as_secs()` turns the `Duration` inside the `Ok` into a `u64`.
 pub fn unix_seconds(time: SystemTime) -> u64 {
-    todo!()
+    match time.duration_since(UNIX_EPOCH) {
+        Ok(duration) => duration.as_secs(),
+        Err(_) => 0,
+    }
 }
 
 /// EXERCISE 2: turn what `ask` returned into an answer, or no answer.
@@ -109,7 +112,11 @@ pub fn unix_seconds(time: SystemTime) -> u64 {
 /// - `.is_empty()` checks for `""`.
 /// - `strip_line_ending` and `escape_for_log` are already imported from Stage 1.
 pub fn clean_answer(raw: &str) -> Option<String> {
-    todo!()
+    if raw.is_empty() {
+        None
+    } else {
+        Some(escape_for_log(strip_line_ending(raw)))
+    }
 }
 
 impl Visit {
@@ -122,7 +129,13 @@ impl Visit {
     ///
     /// Hint: use `unix_seconds` for the time.
     pub fn new(now: SystemTime, source_ip: IpAddr) -> Visit {
-        todo!()
+        Visit {
+            time: unix_seconds(now),
+            source_ip,
+            username: None,
+            password: None,
+            outcome: Outcome::Left,
+        }
     }
 
     /// EXERCISE 4: turn a visit into one line of JSON.
@@ -137,7 +150,7 @@ impl Visit {
     /// Hint: `self` is already a reference, which is what `to_string` wants. It also
     /// returns the right type, so it can be the whole function body.
     pub fn to_json_line(&self) -> serde_json::Result<String> {
-        todo!()
+        serde_json::to_string(self)
     }
 }
 
@@ -152,7 +165,7 @@ impl Visit {
 ///
 /// Hint: this is nearly the same as `append_to_log` from Stage 1.
 pub fn append_visit(log: &mut impl Write, visit: &Visit) -> io::Result<()> {
-    todo!()
+    writeln!(log, "{}", visit.to_json_line()?)
 }
 
 /// EXERCISE 6: work out what a connection error means.
@@ -168,7 +181,10 @@ pub fn append_visit(log: &mut impl Write, visit: &Visit) -> io::Result<()> {
 /// - `error.kind()` gives you something to `match` on.
 /// - Join values with `|`, as in `A | B => ...`.
 pub fn outcome_of_error(error: &io::Error) -> Outcome {
-    todo!()
+    match error.kind() {
+        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut => Outcome::TimedOut,
+        _ => Outcome::Left,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -195,7 +211,16 @@ impl Visit {
         reader: &mut impl BufRead,
         writer: &mut impl Write,
     ) -> io::Result<()> {
-        todo!()
+        let username = ask(LOGIN_PROMPT, reader, writer)?;
+        self.username = clean_answer(&username);
+
+        let password = ask(PASSWORD_PROMPT, reader, writer)?;
+        self.password = clean_answer(&password);
+
+        writer.write_all(REJECTION.as_bytes())?;
+        writer.flush()?;
+
+        Ok(())
     }
 
     /// EXERCISE 8: run the fake login and work out how the visit ended.
@@ -219,7 +244,12 @@ impl Visit {
     ///    Check this last, because someone who hangs up before seeing the rejection
     ///    still made an attempt.
     pub fn run_fake_login(&mut self, reader: &mut impl BufRead, writer: &mut impl Write) {
-        todo!()
+        if let Err(error) = self.ask_for_answers(reader, writer) {
+            self.outcome = outcome_of_error(&error);
+        }
+        if self.password.is_some() {
+            self.outcome = Outcome::Attempted;
+        }
     }
 }
 
@@ -258,7 +288,11 @@ pub fn serve_and_record(
     log: &mut impl Write,
     timeout: Duration,
 ) -> io::Result<Visit> {
-    todo!()
+    let (stream, peer) = listener.accept()?;
+    let mut visit = Visit::new(SystemTime::now(), peer.ip());
+    run_over_connection(&mut visit, &stream, timeout);
+    append_visit(log, &visit)?;
+    Ok(visit)
 }
 
 // ---------------------------------------------------------------------------
