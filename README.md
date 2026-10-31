@@ -87,7 +87,7 @@ internet at first. The other fake services follow one at a time.
       visitor, one time limit for a whole visit, caps on connections overall and per
       IP, a daily budget for the log, keeping text sent without a newline. `Instant`,
       `HashMap`, `Drop`, `Arc` and `Mutex`, threads
-- [ ] **Stage 5: Ready to deploy** (`src/deploy.rs`): a setting for the listen address,
+- [x] **Stage 5: Ready to deploy** (`src/deploy.rs`): a setting for the listen address,
       with localhost as the default and a deliberate flag needed for anything else.
       Refusing to run as root. A limit on visits per IP each minute. Tests that fail if
       the code ever starts a program, connects out or uses UDP, and a compiler ban on
@@ -148,17 +148,37 @@ internet at first. The other fake services follow one at a time.
 
 ### After going live
 
-Build and test each of these on localhost, and deploy it only once its tests and the
-safety checks pass.
+Build and test each of these on localhost. Anything that runs on the server is deployed
+only once its tests and the safety checks pass.
 
-- [ ] **Stage 7: A fake web login**: reading simple HTTP requests by hand, with limits
-      on their size. Fixed, generic fake pages built into the program, never files
-      named in a request. Recording paths, headers and submitted fields, `Vec` and
-      iterators. This is where most attempts to exploit new vulnerabilities will show up
-- [ ] **Stage 8: More fake services**: a `FakeService` trait, plus fixed banners and
+- [ ] **Stage 7: A fake web service**: reading HTTP requests by hand and logging each one
+      in full (method, path, headers and body), so you can spot attempts to exploit
+      newly announced vulnerabilities. `Vec`, iterators, working with raw bytes.
+  - Every reply is one fixed, generic page built into the program. It never serves files,
+    repeats anything from the request, redirects or acts as a proxy
+  - Requests have a size limit. Anything longer is cut off and marked, with its full
+    size recorded. Each IP also gets a share of the daily log budget, so large requests
+    from one source can't use it all up
+  - Bodies are stored encoded, so payloads stay byte for byte and can't affect your
+    terminal. Nothing in them is ever run, and links in them are never followed
+  - The screen shows only the method and the escaped path, never headers or bodies
+  - It starts with plain HTTP. Requests sent only over HTTPS won't be seen, because that
+    needs a certificate and another crate, so it would be a later addition
+  - Before opening the port, check that IONOS's answer covers full request logging. Open
+    the port in both firewalls, and forward it to a port above 1024 instead of running as
+    root
+- [ ] **Stage 8: A report tool for your own computer**: a separate program that reads the
+      logs you've downloaded, and is never uploaded to the server. Top usernames,
+      passwords, paths and services, and what changed from day to day. A rules file you
+      update by hand when a vulnerability is announced, matching paths, headers and
+      bodies, showing when each rule was first and last seen and how many IPs it came
+      from. It can only look back as far as the logs you've kept. `HashMap`, sorting,
+      reading JSON back.
+  - It treats logs as hostile: plain text output only, with everything escaped
+  - It never connects to anything, so no looking up IPs and no opening links
+  - Passwords and IPs are hidden by default
+  - Downloaded logs follow safety rule 4 on your computer too: a private folder, out of
+    git and cloud sync, and deleted on the same schedule
+- [ ] **Stage 9: More fake services**: a `FakeService` trait, plus fixed banners and
       prompts for FTP and SSH (the version banner only), all sharing the same limits.
       Your own traits and enums
-- [ ] **Stage 9: Reports**: reading your JSON logs back, top usernames, passwords,
-      paths and services, what changed from day to day, matching paths against a
-      local list of known vulnerabilities, `HashMap` and sorting. Reports are plain text
-      only, because the logs hold hostile text. Passwords and IPs are hidden by default
