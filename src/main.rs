@@ -1,15 +1,16 @@
 // The honeypot program. It crashes with "not yet implemented" until you've done
-// Stage 1. After that, the README shows how to try it.
+// Stage 2. After that, the README shows how to try it.
 
 use std::fs::{DirBuilder, OpenOptions};
 use std::io;
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 
-use honeypot::login::{listen_on_localhost, serve_one};
+use honeypot::login::{TIMEOUT, listen_on_localhost};
+use honeypot::visit::serve_and_record;
 
 const PORT: u16 = 2323;
 const LOG_DIR: &str = "logs";
-const LOG_FILE: &str = "logs/login.log";
+const LOG_FILE: &str = "logs/visits.jsonl";
 
 fn main() -> io::Result<()> {
     let listener = listen_on_localhost(PORT)?;
@@ -30,11 +31,13 @@ fn main() -> io::Result<()> {
     println!("Try it from another terminal: nc 127.0.0.1 {PORT}");
     println!("Press Ctrl+C to stop.");
 
-    // One bad connection shouldn't stop the program, so report errors and carry on.
+    // Every visit gets logged, even if the login fails. An error here means a
+    // connection couldn't be accepted or the log couldn't be written, and that
+    // shouldn't stop the program either, so report it and carry on.
     loop {
-        match serve_one(&listener, &mut log) {
-            Ok(attempt) => println!("{attempt}"),
-            Err(error) => eprintln!("connection failed: {error}"),
+        match serve_and_record(&listener, &mut log, TIMEOUT) {
+            Ok(visit) => println!("{}", visit.to_json_line()?),
+            Err(error) => eprintln!("could not record a visit: {error}"),
         }
     }
 }

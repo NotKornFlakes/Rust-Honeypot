@@ -29,7 +29,7 @@ These apply to every stage. If a change would break one of them, don't make it.
 
 1. Open the stage's file and read it from top to bottom.
 2. Find the next `todo!()` and replace it with your code.
-3. Run that exercise's tests, for example `cargo test ex1`.
+3. Run that exercise's tests. The top of the stage's file shows the exact command.
 4. Repeat until `cargo test` passes.
 
 | Command          | What it does                                   |
@@ -43,19 +43,23 @@ These apply to every stage. If a change would break one of them, don't make it.
 
 When you're stuck, ask Claude for a hint or a review rather than the answer.
 
-## Trying it after Stage 1
+## Trying it after Stage 2
 
 1. Start it with `cargo run`.
 2. In a second terminal, connect with `nc 127.0.0.1 2323`.
 3. Type a made-up username and password. It will always say `Login incorrect`.
-4. See what it recorded in the first terminal and in `logs/login.log`.
+4. Connect again, and press Ctrl+C without typing anything.
+5. See what it recorded in the first terminal and in `logs/visits.jsonl`.
+6. To read the log more easily, run `jq . logs/visits.jsonl`.
 
 ## Roadmap
 
 - [ ] **Stage 1: Fake login on localhost** (`src/login.rs`): `&str` views, cleaning
       hostile input, `Result`, the `?` operator, reading and writing, `TcpListener`
-- [ ] **Stage 2: Structured logs**: one JSON object per line with the time and
-      source IP, adding crates, `serde` and `serde_json`
+- [ ] **Stage 2: Structured logs** (`src/visit.rs`): one JSON object per line with
+      the time and source IP, for every visitor, including those who leave without
+      typing. Adding crates, `serde` and `serde_json`, `Option`, handling a `Result`
+      yourself, `if let`
 - [ ] **Stage 3: Protecting the logs**: checking file permissions, a new file each
       day, deleting old logs automatically, hiding passwords and IPs on screen
 - [ ] **Stage 4: Many connections at once**: threads, a cap on connections so
