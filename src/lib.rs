@@ -5,4 +5,5 @@
 
 pub mod log_files;
 pub mod login;
+pub mod server;
 pub mod visit;

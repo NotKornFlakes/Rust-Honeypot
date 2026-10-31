@@ -89,11 +89,11 @@ impl LoginAttempt {
     /// If you escape first, the newline has already become visible text and
     /// stripping won't find it.
     pub fn new(username: &str, password: &str) -> LoginAttempt {
-    LoginAttempt {
-        username: escape_for_log(strip_line_ending(username)),
-        password: escape_for_log(strip_line_ending(password)),
+        LoginAttempt {
+            username: escape_for_log(strip_line_ending(username)),
+            password: escape_for_log(strip_line_ending(password)),
+        }
     }
-}
 }
 
 /// EXERCISE 4: decide how an attempt looks in the log.
@@ -203,7 +203,7 @@ pub fn append_to_log(log: &mut impl Write, attempt: &LoginAttempt) -> io::Result
 /// Hint: `TcpListener::bind(...)` takes the address and port as a pair, just like
 /// `sock.bind((host, port))` in Python. It already returns the right type.
 pub fn listen_on_localhost(port: u16) -> io::Result<TcpListener> {
-    TcpListener::bind(("127.0.0.1", port)) 
+    TcpListener::bind(("127.0.0.1", port))
 }
 
 // This is a worked example too. It connects the fake login to a real connection.

@@ -77,7 +77,10 @@ pub fn check_private(path: &Path) -> io::Result<()> {
     if is_private(fs::metadata(path)?.permissions().mode()) {
         Ok(())
     } else {
-        Err(io::Error::new(io::ErrorKind::PermissionDenied, format!("File is not private: {}", path.display())))
+        Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!("File is not private: {}", path.display()),
+        ))
     }
 }
 
@@ -251,6 +254,11 @@ impl DailyLog {
             date: today,
             file,
         })
+    }
+
+    /// How many bytes are in the file for the current day.
+    pub fn size(&self) -> io::Result<u64> {
+        Ok(self.file.metadata()?.len())
     }
 
     /// EXERCISE 7: add a line to the log, starting a new file if the day has changed.
