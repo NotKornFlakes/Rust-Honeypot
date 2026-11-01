@@ -92,41 +92,50 @@ internet at first. The other fake services follow one at a time.
       Refusing to run as root. A limit on visits per IP each minute. Tests that fail if
       the code ever starts a program, connects out or uses UDP, and a compiler ban on
       `unsafe`. `.parse()`, `map_err`, `while let`, slicing text, `.any(...)`
-- [ ] **Stage 6: Going live on an IONOS VPS**: the only stage that faces the internet,
-      and it's setup rather than Rust. Finish this whole checklist first:
+- [ ] **Stage 6: Going live on a Google Cloud e2-micro**: the only stage that faces the
+      internet, and it's setup rather than Rust. Finish this whole checklist first.
+      [`deploy/README.md`](deploy/README.md) has the commands, in order:
   - **Permission**
-    - [ ] Ask IONOS support in writing whether a research honeypot is allowed, and say
-          that it records IP addresses and the passwords people type. Their
-          [general terms](https://www.ionos.com/terms-gtc/general-terms-and-conditions/)
-          don't mention honeypots, but section 8.11 bars collecting personally
-          identifiable data without consent. Keep the reply. If the answer is no, use a
-          different provider
+    - [ ] Ask Google in writing whether a research honeypot is allowed, and say that it
+          records IP addresses and the passwords people type. Their
+          [Acceptable Use Policy](https://cloud.google.com/terms/aup) doesn't mention
+          honeypots, but it bars anything "invasive" and items of a "deceptive nature".
+          Without a paid [support plan](https://docs.cloud.google.com/support/docs/overview)
+          you may not get an answer. Keep any reply. If the answer is no, use a different
+          provider. If there's no answer, going ahead is your own decision and your own
+          risk, so write down the date, what you read and why you went ahead
     - [ ] Check the local rules for storing IP addresses and passwords, for both your
           country and the server's. Write down how long you'll keep them, and set
           `KEEP_DAYS` to match
   - **Isolation**
-    - [ ] Use an IONOS contract with nothing else on it, a unique password and two-factor
-          login. No connection to your home network or other projects, and no real
-          credentials or personal data on the server
-    - [ ] In the Cloud Panel firewall, open only the fake service's port, plus the admin
-          port from your IP alone
-    - [ ] Block outbound traffic on the server itself with `nftables`, allowing only
-          replies to incoming connections. The Cloud Panel's
-          [firewall rules](https://www.ionos.com/help/server-cloud-infrastructure/firewall-vps/editing-a-firewall-policy-vps-migrated-cloud-servers-and-vps/)
-          only cover incoming traffic. Install what you need first, then close it, and
-          test that an outbound connection really fails
-    - [ ] Keep admin access separate from the fake services: its own port, its own SSH
-          key used nowhere else, and no password logins
+    - [ ] Use a Google account and project with nothing else in them, a unique password
+          and 2-Step Verification. No connection to your home network or other projects,
+          and no real credentials or personal data on the server
+    - [ ] Set a budget alert. [Free Tier](https://docs.cloud.google.com/free/docs/free-cloud-features)
+          covers the e2-micro, 30 GB of standard disk and 1 GB of outbound traffic a month.
+          It doesn't cover the [public IP address](https://cloud.google.com/vpc/network-pricing),
+          at about $3.60 a month. An alert warns you, but it doesn't stop the spending
+    - [ ] In Google Cloud's firewall, open only the fake service's port, plus the admin
+          port from Google's IAP range alone
+    - [ ] Block outbound traffic twice: with a firewall rule, and on the server itself
+          with `nftables`, allowing only replies to incoming connections and what the
+          server needs from its own metadata server. Google's
+          [firewall rules](https://docs.cloud.google.com/firewall/docs/firewalls) don't
+          apply to that traffic. Install what you need first, then close both, and test
+          each one alone to prove an outbound connection really fails
+    - [ ] Keep admin access separate from the fake services: an IAP tunnel, so the public
+          IP shows no admin port, its own SSH key used nowhere else, and no password logins
+    - [ ] Give the server no service account, so it has no Google Cloud permissions
     - [ ] Use IPv4 only. The program refuses to listen on IPv6
-    - [ ] Leave IONOS backups and snapshots off, so logs aren't copied somewhere your
-          retention plan can't reach
+    - [ ] Leave snapshots, flow logs and the Ops Agent off, so logs aren't copied somewhere
+          your retention plan can't reach
   - **Running it**
-    - [ ] Install `cargo audit` with `cargo install cargo-audit`, run it on your own
+    - [x] Install `cargo audit` with `cargo install cargo-audit`, run it on your own
           computer, and deal with anything it finds. Then build with
           `cargo build --release --target x86_64-unknown-linux-musl`, which runs on any
-          x86-64 Linux server, and upload the program
-    - [ ] Run it as an unprivileged user with no other access. Use `nftables` to forward
-          the public port to 2323, instead of running it as root
+          x86-64 Linux server
+    - [ ] Upload the program and run it as an unprivileged user with no other access. Use
+          `nftables` to forward the public port to 2323, instead of running it as root
     - [ ] Run it under systemd with `--listen 0.0.0.0:2323 --checklist-done`. Set memory,
           CPU and task limits, no new privileges, a read-only filesystem except for
           `logs/`, and a restart if it fails
@@ -134,16 +143,16 @@ internet at first. The other fake services follow one at a time.
           by default), with space to spare
     - [ ] Copy logs off by pulling them over admin access, so the server never sends
           anything out. Keep the copies private, and delete them on the same schedule
-    - [ ] To update the server, reinstall it from a fresh image instead of opening up
-          outbound traffic
+    - [ ] To update the server, reinstall it from a fresh image instead of leaving outbound
+          traffic open
   - **Stopping it**
-    - [ ] Practise your emergency stop: Cloud Panel, Actions,
-          [Suspend](https://www.ionos.com/help/server-cloud-infrastructure/akkordeons-zu-vps/server-administration-vps/suspending-a-server-vps-and-migrated-cloud-servers/).
-          IONOS has [no Delete button for a VPS](https://www.ionos.ca/help/server-cloud-infrastructure/server-administration/deleting-a-server),
-          so getting rid of it for good means cancelling the contract, which
-          renews automatically if you miss the deadline
-    - [ ] Decide when you'll use it. Any unexpected outbound traffic or an abuse report
-          from IONOS means stop first and investigate afterwards
+    - [ ] Practise your emergency stop before the port opens:
+          `gcloud compute instances stop honeypot`, or Stop in the Cloud Console. It keeps
+          the disk, so you can investigate afterwards. `terraform destroy` removes the
+          server and its logs, and deleting the project ends everything for good
+    - [ ] Decide when you'll use it. Any outbound attempt by the honeypot, any other
+          unexplained outbound traffic or an abuse report from Google means stop first and
+          investigate afterwards
     - [ ] Start with the fake login only, and check the logs for a day
 
 ### After going live
@@ -164,7 +173,7 @@ only once its tests and the safety checks pass.
   - The screen shows only the method and the escaped path, never headers or bodies
   - It starts with plain HTTP. Requests sent only over HTTPS won't be seen, because that
     needs a certificate and another crate, so it would be a later addition
-  - Before opening the port, check that IONOS's answer covers full request logging. Open
+  - Before opening the port, check that Google's answer covers full request logging. Open
     the port in both firewalls, and forward it to a port above 1024 instead of running as
     root
 - [ ] **Stage 8: A report tool for your own computer**: a separate program that reads the

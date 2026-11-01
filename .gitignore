@@ -4,3 +4,9 @@
 /logs/
 *.log
 *.jsonl
+
+# Terraform's working files. They name your project and your server's address.
+.terraform/
+*.tfstate
+*.tfstate.*
+terraform.tfvars

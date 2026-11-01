@@ -1,0 +1,60 @@
+[Unit]
+Description=Research honeypot (fake login only)
+# Never run without the firewall that stops it connecting out.
+Requires=nftables.service
+After=nftables.service network-online.target
+Wants=network-online.target
+
+[Service]
+User=honeypot
+Group=honeypot
+ExecStart=/opt/honeypot/honeypot --listen 0.0.0.0:2323 --checklist-done
+Restart=on-failure
+RestartSec=5s
+
+# Logs go in /var/lib/honeypot/logs. The program checks they're private before it starts.
+WorkingDirectory=/var/lib/honeypot
+StateDirectory=honeypot
+StateDirectoryMode=0700
+UMask=0077
+
+# The screen output includes usernames, and people sometimes type passwords as usernames. If
+# the journal kept it, those would outlive KEEP_DAYS. Errors hold no visitor data, so they stay.
+StandardOutput=null
+StandardError=journal
+
+# 64 visitors at once, plus the main and screen threads.
+TasksMax=80
+MemoryMax=256M
+MemorySwapMax=0
+CPUQuota=50%
+LimitNOFILE=256
+
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectProc=invisible
+ProcSubset=pid
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_INET
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+SystemCallErrorNumber=EPERM
+
+[Install]
+WantedBy=multi-user.target

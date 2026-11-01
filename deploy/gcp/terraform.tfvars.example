@@ -1,0 +1,6 @@
+# Copy this to terraform.tfvars, which git ignores.
+project_id = "your-project-id"
+
+# Setup starts with these two values. deploy/README.md says when to change each one.
+allow_setup_egress = true
+expose_fake_login  = false
