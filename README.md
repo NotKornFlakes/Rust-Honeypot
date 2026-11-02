@@ -54,7 +54,7 @@ they tried to log in.
 | An attacker's text gets sent back | Replies have the type `&'static str`, so the compiler refuses anything a visitor typed | The logs don't record replies, so this rests on the compiler and the tests |
 | A session is held open to use up places | A session shares the visit's one 30-second deadline, for reading and for writing. The caps of 64 connections, 4 per IP and 60 visits a minute are unchanged | "Refused by the limits" climbing in the daily summary |
 | Sessions fill the disk or push out other visits | Each session gets 200 lines and 64 KB of stored text. One IP gets 2 MB a day and all of them together 20 MB, and after that logins are rejected as they were before. The 100 MB daily log budget still applies | Disk use in the daily summary |
-| Replies run up a bill | Each session gets 8 KB of replies, inside the same daily limits, which keep the shell within Free Tier's 1 GB a month. The daily summary also copies only the logs that changed | "Sent since boot" in the daily summary, and the budget alert |
+| Replies run up a bill | Each session gets 8 KB of replies, inside the same daily limits, which keep the shell within Free Tier's 1 GB a month. The daily summary also copies only the logs that changed | "Sent in the last 24 hours" in the daily summary, and the budget alert |
 | A bug in the new code gets hit | Safe Rust only, with `unsafe` banned. A crash ends one visitor's thread and gives their place back. The worst case should be one lost log line | "Crashes during a visit" in the daily summary |
 | Logs hold hostile commands, stolen passwords, pieces of malware and other people's servers | Everything is escaped before it's stored. The screen and the daily summary only show counts. `KEEP_DAYS` deletes them on the same schedule. Safety rule 4 covers the rest | Nothing warns you, so this rests on following rule 4 |
 | The list of logins holds a real password | `deploy/host/credentials.txt` holds only common factory defaults, in git where you can read it | Reading the list before you deploy |
@@ -254,10 +254,10 @@ only once its tests and the safety checks pass.
       terminal probe. So they weren't asking for an answer. The likeliest reason is that they were
       waiting for the server to speak telnet first, but the logs can't prove that
   - **Before it goes on the server**
-    - [ ] Finish the exercises. `cargo test` passes, including the `guard_` tests, and `cargo
+    - [x] Finish the exercises. `cargo test` passes, including the `guard_` tests, and `cargo
           clippy` and `cargo audit` have nothing new to say
-    - [ ] Try it on localhost, as described above
-    - [ ] Review all the changes. Nothing in this stage touches the server until you decide it does
+    - [x] Try it on localhost, as described above
+    - [x] Review all the changes. Nothing in this stage touches the server until you decide it does
     - [ ] Finish Stage 6, including the day of checking the logs with the fake login only
     - [x] Decide again about Google's terms. What you asked them, and the decision written down in
           Stage 6, covered a login that always says no. A fake login that says yes and records
@@ -284,7 +284,7 @@ only once its tests and the safety checks pass.
         The only reports go to AbuseIPDB, with the full IP, a category and a short comment with no
         log values. Searching URLhaus for a URL is fine, since that's a database lookup and doesn't
         open the address, but I never submit to it
-    - [ ] Read `deploy/host/credentials.txt`, and check that it holds only common factory defaults
+    - [x] Read `deploy/host/credentials.txt`, and check that it holds only common factory defaults
   - **Deploying**
     - [ ] Follow "Turning on the fake shell" in [`deploy/README.md`](deploy/README.md), which
           reinstalls the server. It keeps the port closed until the end
@@ -299,16 +299,16 @@ only once its tests and the safety checks pass.
           the daily summary with the days before. If most visitors still send nothing, the opening
           wasn't the reason, and the shell will keep seeing very few logins
   - **Stopping it**
-    - [ ] Add these to the rules from Stage 6. Each one means stop first and investigate
+    - [x] Add these to the rules from Stage 6. Each one means stop first and investigate
           afterwards, and `deploy/daily-logs.sh` checks the first four:
       - Another program running as the `honeypot` user, which would mean something got run
       - A file owned by `honeypot` outside its logs folder
       - A crash during a visit, which means a visitor can reach a bug
-      - The server sending more than 40 MB a day on average, which means a limit isn't working
+      - The server sending more than 40 MB in the last 24 hours, which means a limit isn't working
       - A budget alert from Google
       - A command or address that seems to involve illegal material or someone's private data.
         Don't open it or copy it anywhere, and get advice before you decide what to do with the logs
-    - [ ] Any `egress-blocked-honeypot` line was already a reason to stop, and it now matters most
+    - [x] Any `egress-blocked-honeypot` line was already a reason to stop, and it now matters most
           of all: straight after a download in the logs, it would mean the program tried to do what
           it was told
 - [ ] **Stage 8: A fake web service**: reading HTTP requests by hand and logging each one

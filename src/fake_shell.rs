@@ -36,11 +36,6 @@
 //! `--credentials`. With that flag, it crashes with "not yet implemented" until you've
 //! finished this stage.
 
-// While the exercises are full of `todo!()`, some arguments, imports and other code aren't
-// used, and the compiler warns about it. This line silences those warnings. Delete this
-// comment and the line below once you've finished the stage.
-#![allow(dead_code, unused_variables, unused_imports)]
-
 use std::collections::HashMap;
 use std::io::{self, BufRead, Read, Write};
 use std::net::{IpAddr, Ipv4Addr};
@@ -779,7 +774,6 @@ impl Visit {
 const IAC: u8 = 255;
 const DONT: u8 = 254;
 const DO: u8 = 253;
-const WONT: u8 = 252;
 const WILL: u8 = 251;
 const SB: u8 = 250;
 const SE: u8 = 240;
@@ -1031,6 +1025,9 @@ mod tests {
     const LONG_LIMIT: Duration = Duration::from_secs(20);
     const REJECTED: &str = "login: Password: Login incorrect\r\n";
     const LOGGED_IN: &str = "login: Password: # ";
+
+    // The decoder only meets this one inside the range `WILL..=DONT`, so only the tests name it.
+    const WONT: u8 = 252;
 
     // Words that must never come back. This is what a visitor's own text looks like.
     const MARKER: &str = "XYZZY";

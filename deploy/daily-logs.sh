@@ -142,10 +142,6 @@ echo "Crashes during a visit: $(sudo journalctl -u honeypot _TRANSPORT=stdout --
 echo "Other programs run by the honeypot user: $(ps -u honeypot -o comm= | grep -cvx honeypot)"
 echo "Its files outside the logs folder: $(sudo find / -xdev -user honeypot -not -path /var/lib/honeypot -not -path '/var/lib/honeypot/*' 2>/dev/null | wc -l)"
 
-sent=$(awk -F'[: ]+' 'NR > 2 && $2 != "lo" { total += $11 } END { printf "%.0f", total }' /proc/net/dev)
-per_day=$(awk -v sent="$sent" -v up="$(cut -d' ' -f1 /proc/uptime)" 'BEGIN { days = up / 86400; if (days < 1) days = 1; printf "%.0f", sent / days / 1048576 }')
-echo "Sent since boot: $(mb "$sent") MB, about $per_day MB a day"
-
 sudo journalctl -k --since "@$since" --no-pager -o cat --grep egress-blocked |
   awk '{
     who = /egress-blocked-honeypot:/ ? "honeypot" : "other"
@@ -171,10 +167,6 @@ grep -q '^Firewall: active' <<<"$REPORT" || stop_because "the server's firewall 
 grep -q '^Crashes during a visit: 0$' <<<"$REPORT" || stop_because "the program crashed during a visit"
 grep -q '^Other programs run by the honeypot user: 0$' <<<"$REPORT" || stop_because "the honeypot user ran another program"
 grep -q '^Its files outside the logs folder: 0$' <<<"$REPORT" || stop_because "the honeypot user wrote a file outside its logs"
-PER_DAY=$(sed -n 's/^Sent since boot: .*about \([0-9]*\) MB a day$/\1/p' <<<"$REPORT")
-if [ -z "$PER_DAY" ] || [ "$PER_DAY" -gt "$MAX_SENT_MB_PER_DAY" ]; then
-  stop_because "the server is sending more than the limits allow (over $MAX_SENT_MB_PER_DAY MB a day)"
-fi
 
 if [ -z "$BLOCKED" ]; then
   echo "  Blocked outbound, $WINDOW: none"
@@ -191,6 +183,30 @@ HITS=$(gcloud logging read "logName=\"projects/$(gcloud config get project 2>/de
   --format='value(jsonPayload.connection.dest_ip,jsonPayload.connection.dest_port)' 2>>"$ERRORS")
 echo "  Google firewall hits, $WINDOW: $(grep -c . <<<"$HITS" || true)"
 if [ -n "$HITS" ] && grep -qvP '^1\.1\.1\.1\t443$' <<<"$HITS"; then stop_because "Google's firewall blocked something"; fi
+
+# Google's own count of what the server sent in the last 24 hours. It doesn't rely on anything the
+# server reports, and a reboot doesn't reset it, so a sudden jump shows up the next day. It reads
+# lower than the server's own counter, which also includes background traffic Google doesn't count,
+# most likely to the metadata server.
+SENT=$(printf 'Authorization: Bearer %s' "$(gcloud auth print-access-token 2>>"$ERRORS")" |
+  curl -sS --max-time 30 -G -H @- \
+    "https://monitoring.googleapis.com/v3/projects/$(gcloud config get project 2>/dev/null)/timeSeries" \
+    --data-urlencode 'filter=metric.type="compute.googleapis.com/instance/network/sent_bytes_count" AND metric.labels.instance_name="honeypot"' \
+    --data-urlencode "interval.startTime=$(date -u -d '1 day ago' +%FT%TZ)" \
+    --data-urlencode "interval.endTime=$(date -u +%FT%TZ)" \
+    --data-urlencode 'aggregation.alignmentPeriod=86400s' \
+    --data-urlencode 'aggregation.perSeriesAligner=ALIGN_SUM' \
+    --data-urlencode 'aggregation.crossSeriesReducer=REDUCE_SUM' 2>>"$ERRORS" |
+  jq -r '[.timeSeries[]?.points[]?.value.int64Value | tonumber] | add // empty' 2>>"$ERRORS" || true)
+if [ -z "$SENT" ]; then
+  echo "  Sent in the last 24 hours: Google didn't say"
+  stop_because "Google didn't say how much the server sent, so that limit wasn't checked"
+else
+  echo "  Sent in the last 24 hours, by Google's count: $(awk -v bytes="$SENT" 'BEGIN { printf "%.1f", bytes / 1048576 }') MB"
+  if [ "$SENT" -gt $((MAX_SENT_MB_PER_DAY * 1048576)) ]; then
+    stop_because "the server sent more than the limits allow (over $MAX_SENT_MB_PER_DAY MB in the last 24 hours)"
+  fi
+fi
 
 echo
 if [ "${#REASONS[@]}" -gt 0 ]; then
