@@ -265,7 +265,9 @@ impl Credentials {
     ///
     /// Hint: `user` is a `&String` and `username` is a `&str`, and `==` can compare them.
     pub fn accepts(&self, username: &str, password: &str) -> bool {
-        self.pairs.iter().any(|(user, pass)| *user == username && *pass == password)
+        self.pairs
+            .iter()
+            .any(|(user, pass)| *user == username && *pass == password)
     }
 
     /// How many logins are on the list.
@@ -430,7 +432,7 @@ pub fn ends_session(part: &str) -> bool {
 ///
 /// Hint: `if let Some(failure) = download_failure(part) { return failure; }` handles step 1.
 pub fn canned_reply(part: &str) -> &'static str {
-   if let Some(failure) = download_failure(part) {
+    if let Some(failure) = download_failure(part) {
         return failure;
     }
     let command = without_path(part);

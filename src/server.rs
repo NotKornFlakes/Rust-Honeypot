@@ -200,7 +200,14 @@ impl<'a> WriteLimited<'a> {
 /// `let mut writer = stream;` does in `run_visit`.
 impl Write for WriteLimited<'_> {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        todo!()
+        match time_left(self.deadline, Instant::now()) {
+            None => Err(io::ErrorKind::TimedOut.into()),
+            Some(left) => {
+                self.stream.set_write_timeout(Some(left))?;
+                let mut stream = self.stream;
+                stream.write(bytes)
+            }
+        }
     }
 
     // Nothing is held back in this type, so there's nothing to flush.
