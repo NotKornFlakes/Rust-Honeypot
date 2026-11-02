@@ -93,9 +93,12 @@ off. If one of them doesn't exist on this image, that's fine.
 
 ```sh
 sudo apt-get update && sudo apt-get -y full-upgrade && sudo apt-get -y install nftables
-for unit in google-osconfig-agent unattended-upgrades apt-daily.timer apt-daily-upgrade.timer; do
+for unit in exim4 google-osconfig-agent unattended-upgrades apt-daily.timer apt-daily-upgrade.timer; do
   sudo systemctl disable --now "$unit"
 done
+
+sudo mkdir -p /etc/systemd/resolved.conf.d
+printf '[Resolve]\nLLMNR=no\nMulticastDNS=no\n' | sudo tee /etc/systemd/resolved.conf.d/quiet.conf
 
 sudo useradd --system --no-create-home --shell /usr/sbin/nologin honeypot
 sudo install -D -m 755 honeypot /opt/honeypot/honeypot
@@ -150,7 +153,9 @@ sudo sh -c 'tail -n 1 /var/lib/honeypot/logs/visits-*.jsonl'
 
 Now see what the server's own services have tried to send. Any line here happened before a
 single visitor arrived, so work out what each one is, and turn that service off if you can.
-This list is what normal looks like, which you'll compare against later.
+This list is what normal looks like, which you'll compare against later. Google's guest agent
+also keeps trying to look up `logging.googleapis.com` and its other services. That's expected,
+and those lookups are dropped without a log line, so they don't appear here.
 
 ```sh
 sudo journalctl -k --grep egress-blocked --no-pager
@@ -187,7 +192,8 @@ nc -z -w 5 "$IP" 2323 && echo 'OPEN: STOP' || echo closed
 
 Any `egress-blocked-honeypot` line, or any hit in the cloud firewall's log, means stop the
 server first and investigate afterwards. So does an `egress-blocked` line that isn't on your
-list from step 6.
+list from step 6. The exception is your own test from step 5, which shows up in the cloud
+firewall's log as a connection to 1.1.1.1 on port 443.
 
 ```sh
 ssh honeypot "sudo journalctl -k --since '1 day ago' --grep egress-blocked --no-pager"
