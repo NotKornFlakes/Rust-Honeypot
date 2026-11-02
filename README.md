@@ -264,10 +264,11 @@ only once its tests and the safety checks pass.
           commands is a bigger step towards "deceptive", so write down the date, what you read and
           why you're going ahead
       - **2026-11-02, going ahead without an answer.** I asked Google whether a research honeypot
-        is allowed and got no reply. On 2026-11-02 I read Google Cloud's Acceptable Use Policy, the
-        part on deceptive content. I read "deceptive" as aimed at deceiving people, such as phishing,
-        scams or impersonating a real organization. The honeypot only shows a fake login and shell
-        to automated attackers who connect uninvited, and imitates no real company or person. The
+        is allowed and got no reply. On 2026-11-02 I read Google Cloud's Acceptable Use Policy. I
+        read "deceptive" as aimed at deceiving people, such as phishing, scams or impersonating a
+        real organization. The honeypot only shows a fake login and shell to automated attackers who
+        connect uninvited, and imitates no real company or person. My answer on "invasive" is that
+        the honeypot only answers connections others start, and never contacts or probes anyone. The
         fake shell runs no commands, fetches nothing, and outbound traffic is blocked at two
         firewalls, so it can't connect out to anyone. I accept the risk that Google disagrees and
         closes the account, since the project is disposable and can be rebuilt from Terraform
@@ -280,7 +281,9 @@ only once its tests and the safety checks pass.
         was done. Anything I publish (article, README, public repo) will contain only summaries and
         indicators such as malware URLs, attacker IPs and command patterns, never raw logs. Anything
         public masks IPs to two numbers and defangs URLs with credentials and query strings removed.
-        Full values go only to abuse-reporting services like URLhaus and AbuseIPDB
+        The only reports go to AbuseIPDB, with the full IP, a category and a short comment with no
+        log values. Searching URLhaus for a URL is fine, since that's a database lookup and doesn't
+        open the address, but I never submit to it
     - [ ] Read `deploy/host/credentials.txt`, and check that it holds only common factory defaults
   - **Deploying**
     - [ ] Follow "Turning on the fake shell" in [`deploy/README.md`](deploy/README.md), which
