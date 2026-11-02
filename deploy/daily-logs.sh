@@ -41,6 +41,10 @@ echo
 
 # Visits from 127.x are tests run on the server itself. A username only shows if several IPs
 # tried it, because a one-off could be a real password typed into the wrong box.
+#
+# The retry line finds IPs that stay silent for about 8 seconds, hang up, wait about 5 and try
+# again. Only the silent visits are timed, so an IP still counts if another of its visits sends
+# something or gets into the shell, which an "every visit was silent" rule would hide.
 {
   cat "$LOG_DIR/visits-$(date -u -d yesterday +%F).jsonl" \
     "$LOG_DIR/visits-$(date -u +%F).jsonl" 2>/dev/null || true
@@ -49,10 +53,20 @@ echo
   def top($n): to_entries | sort_by(-.value) | .[:$n]
     | map("\(.key[:32]) (\(.value))") | join(", ")
     | if . == "" then "none" else . end;
+  def gaps: sort | [range(1; length) as $i | .[$i] - .[$i - 1]];
+  def median: sort | .[length / 2 | floor];
+  def retries: length >= 5 and (gaps | median | . >= 12 and . <= 15);
+  def retry_summary: .spoke as $spoke | .got_in as $got_in
+    | .silent_at | with_entries(select(.value | retries))
+    | {ips: length, visits: (map(length) | add // 0),
+       spoke: ([keys[] | select($spoke[.])] | length),
+       got_in: ([keys[] | select($got_in[.])] | length)}
+    | "\(.ips) IP(s), \(.visits) visit(s). \(.ips - .spoke) only stayed silent, \(.spoke) also sent something, \(.got_in) got into the fake shell";
   reduce (inputs | fromjson? | select(.time >= $since and (.source_ip | startswith("127.") | not))) as $v
-    ({visits: 0, outcomes: {}, ips: {}, nets: {}, users: {}, passwords: {}, commands: 0, urls: 0, sent: 0, silent: 0, offered: 0, answered: 0};
+    ({visits: 0, outcomes: {}, ips: {}, nets: {}, users: {}, passwords: {}, commands: 0, urls: 0, sent: 0, silent: 0, offered: 0, answered: 0, silent_at: {}, spoke: {}, got_in: {}};
      .visits += 1
-     | if $v.username == null then .silent += 1 else . end
+     | if $v.username == null then .silent += 1 | .silent_at[$v.source_ip] += [$v.time] else .spoke[$v.source_ip] = 1 end
+     | if $v.outcome == "logged_in" then .got_in[$v.source_ip] = 1 else . end
      | if $v.telnet != null then .offered += 1 else . end
      | if ($v.telnet // "") != "" then .answered += 1 else . end
      | .commands += ($v.shell.commands // [] | length)
@@ -69,6 +83,7 @@ echo
     "  Left early: \(.outcomes.left // 0)",
     "  Went quiet: \(.outcomes.timed_out // 0)",
     "  Sent nothing at all: \(.silent)",
+    "  Silent retry pattern (5+ silent visits about 13 seconds apart): \(retry_summary)",
     "  Offered the telnet opening: \(.offered), and answered it: \(.answered)",
     "  Different passwords: \(.passwords | length) (hidden)",
     "  Usernames tried by several IPs: \(.users | map_values(length) | with_entries(select(.value >= 2)) | top(5))",
