@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Copies the visit logs to this computer and prints a short summary. Run it once a day.
 #
-# Logs are private and hostile, so the summary never shows a password, cuts each IP address
-# down to its first two numbers, and strips anything that could affect the terminal.
+# Logs are private and hostile, so the summary never shows a password, a command or a download
+# address, cuts each IP address down to its first two numbers, and strips anything that could
+# affect the terminal.
 set -euo pipefail
 umask 077
 
@@ -10,6 +11,10 @@ LOG_DIR="$HOME/honeypot-logs"
 
 # Keep this the same as KEEP_DAYS in src/log_files.rs.
 KEEP_DAYS=30
+
+# The fake shell costs at most 20 MB a day (MAX_SHELL_BYTES_PER_DAY in src/fake_shell.rs), and
+# nothing else the server sends is large. Well over that means a limit isn't working.
+MAX_SENT_MB_PER_DAY=40
 
 # The tunnel prints a harmless warning each time, so only show this if something fails.
 ERRORS=$(mktemp)
@@ -19,10 +24,14 @@ printable() {
   LC_ALL=C tr -cd '\11\12\40-\176'
 }
 
-# Tar exits with 1 if today's log grows while it's being read, which is harmless. A line cut
-# off that way is skipped below, and the next copy replaces it.
+# Only copy what's changed since the newest copy here, with a day's overlap, because this counts
+# as outbound traffic too. With no copies yet, that's everything. Tar exits with 1 if today's log
+# grows while it's being read, which is harmless. A line cut off that way is skipped below, and
+# the next copy replaces it.
 mkdir -p "$LOG_DIR"
-ssh honeypot 'sudo tar -C /var/lib/honeypot/logs -cf - . || [ $? -eq 1 ]' 2>>"$ERRORS" |
+NEWEST=$(find "$LOG_DIR" -name 'visits-*.jsonl' -printf '%T@\n' | sort -n | tail -n 1 | cut -d. -f1)
+COPY_SINCE=$((${NEWEST:-86400} - 86400))
+ssh honeypot "sudo tar -C /var/lib/honeypot/logs --newer-mtime=@$COPY_SINCE -cf - . || [ \$? -eq 1 ]" 2>>"$ERRORS" |
   tar -C "$LOG_DIR" --no-same-owner -xf -
 find "$LOG_DIR" -name 'visits-*.jsonl' -mtime "+$KEEP_DAYS" -delete
 
@@ -41,8 +50,14 @@ echo
     | map("\(.key[:32]) (\(.value))") | join(", ")
     | if . == "" then "none" else . end;
   reduce (inputs | fromjson? | select(.time >= $since and (.source_ip | startswith("127.") | not))) as $v
-    ({visits: 0, outcomes: {}, ips: {}, nets: {}, users: {}, passwords: {}};
+    ({visits: 0, outcomes: {}, ips: {}, nets: {}, users: {}, passwords: {}, commands: 0, urls: 0, sent: 0, silent: 0, offered: 0, answered: 0};
      .visits += 1
+     | if $v.username == null then .silent += 1 else . end
+     | if $v.telnet != null then .offered += 1 else . end
+     | if ($v.telnet // "") != "" then .answered += 1 else . end
+     | .commands += ($v.shell.commands // [] | length)
+     | .urls += ($v.shell.urls // [] | length)
+     | .sent += ($v.shell.reply_bytes // 0)
      | .outcomes[$v.outcome] += 1
      | .ips[$v.source_ip] = 1
      | .nets[$v.source_ip | mask] += 1
@@ -50,8 +65,11 @@ echo
      | if ($v.password // "") != "" then .passwords[$v.password] = 1 else . end)
   | "Last 24 hours: \(.visits) visit(s) from \(.ips | length) IP address(es)",
     "  Tried a login: \(.outcomes.attempted // 0)",
+    "  Got into the fake shell: \(.outcomes.logged_in // 0), with \(.commands) command(s) and \(.urls) download address(es) (hidden), \(.sent / 1024 | floor) KB sent back",
     "  Left early: \(.outcomes.left // 0)",
     "  Went quiet: \(.outcomes.timed_out // 0)",
+    "  Sent nothing at all: \(.silent)",
+    "  Offered the telnet opening: \(.offered), and answered it: \(.answered)",
     "  Different passwords: \(.passwords | length) (hidden)",
     "  Usernames tried by several IPs: \(.users | map_values(length) | with_entries(select(.value >= 2)) | top(5))",
     "  Busiest networks: \(.nets | top(5))"
@@ -85,6 +103,7 @@ mb() { awk -v bytes="$1" 'BEGIN { printf "%.1f", bytes / 1048576 }'; }
 
 echo "Program: $(systemctl is-active honeypot), $(get honeypot NRestarts) restart(s), memory $(mb "$(get honeypot MemoryCurrent)") MB (peak $(mb "$(get honeypot MemoryPeak)") of 256 MB)"
 echo "Firewall: $(systemctl is-active nftables)"
+echo "Fake shell: $(systemctl show honeypot -p ExecStart --value | grep -q -- --credentials && echo on || echo off)"
 echo "Disk: $(df -h --output=pcent,avail / | tail -1 | awk '{print $1 " used, " $2 " free"}')"
 
 boot=$(date -d "$(uptime -s)" +%s)
@@ -98,6 +117,16 @@ echo "Refused by the limits since boot: about $((refused > 0 ? refused : 0))"
 errors=$(sudo journalctl -u honeypot _TRANSPORT=stdout --since "@$since" --no-pager -o cat | wc -l)
 echo "Program errors: $errors"
 [ "$errors" -eq 0 ] || sudo journalctl -u honeypot _TRANSPORT=stdout --since "@$since" --no-pager -o cat | tail -n 3 | cut -c1-100 | sed 's/^/  /'
+echo "Crashes during a visit: $(sudo journalctl -u honeypot _TRANSPORT=stdout --since "@$since" --no-pager -o cat | grep -c panicked)"
+
+# Nothing the program does should ever show up here. "Nothing is ever run" is the rule these check
+# from the outside, whatever the code says.
+echo "Other programs run by the honeypot user: $(ps -u honeypot -o comm= | grep -cvx honeypot)"
+echo "Its files outside the logs folder: $(sudo find / -xdev -user honeypot -not -path /var/lib/honeypot -not -path '/var/lib/honeypot/*' 2>/dev/null | wc -l)"
+
+sent=$(awk -F'[: ]+' 'NR > 2 && $2 != "lo" { total += $11 } END { printf "%.0f", total }' /proc/net/dev)
+per_day=$(awk -v sent="$sent" -v up="$(cut -d' ' -f1 /proc/uptime)" 'BEGIN { days = up / 86400; if (days < 1) days = 1; printf "%.0f", sent / days / 1048576 }')
+echo "Sent since boot: $(mb "$sent") MB, about $per_day MB a day"
 
 sudo journalctl -k --since "@$since" --no-pager -o cat --grep egress-blocked |
   awk '{
@@ -111,14 +140,23 @@ sudo journalctl -k --since "@$since" --no-pager -o cat --grep egress-blocked |
 ON_SERVER
 )
 
-STOP=0
+REASONS=()
+stop_because() { REASONS+=("$1"); }
+
 REPORT=$(printable <<<"$SERVER")
 BLOCKED=$(grep '^BLOCKED ' <<<"$REPORT" || true)
 echo "Server"
 echo "  Port 23: $PORT_STATE"
 grep -v '^BLOCKED ' <<<"$REPORT" | sed 's/^/  /'
-grep -q '^Program: active' <<<"$REPORT" || STOP=1
-grep -q '^Firewall: active' <<<"$REPORT" || STOP=1
+grep -q '^Program: active' <<<"$REPORT" || stop_because "the program isn't running"
+grep -q '^Firewall: active' <<<"$REPORT" || stop_because "the server's firewall isn't running"
+grep -q '^Crashes during a visit: 0$' <<<"$REPORT" || stop_because "the program crashed during a visit"
+grep -q '^Other programs run by the honeypot user: 0$' <<<"$REPORT" || stop_because "the honeypot user ran another program"
+grep -q '^Its files outside the logs folder: 0$' <<<"$REPORT" || stop_because "the honeypot user wrote a file outside its logs"
+PER_DAY=$(sed -n 's/^Sent since boot: .*about \([0-9]*\) MB a day$/\1/p' <<<"$REPORT")
+if [ -z "$PER_DAY" ] || [ "$PER_DAY" -gt "$MAX_SENT_MB_PER_DAY" ]; then
+  stop_because "the server is sending more than the limits allow (over $MAX_SENT_MB_PER_DAY MB a day)"
+fi
 
 if [ -z "$BLOCKED" ]; then
   echo "  Blocked outbound, $WINDOW: none"
@@ -126,7 +164,7 @@ else
   echo "  Blocked outbound, $WINDOW:"
   cut -d' ' -f2- <<<"$BLOCKED" | sed 's/^/    /'
   # 1.1.1.1:443 is the self-test from deploy/README.md, so it doesn't count.
-  if grep -qv ' 1\.1\.1\.1:443 ' <<<"$BLOCKED"; then STOP=1; fi
+  if grep -qv ' 1\.1\.1\.1:443 ' <<<"$BLOCKED"; then stop_because "something tried to connect out"; fi
 fi
 
 # The same test also shows up here if it's run with nftables off.
@@ -134,11 +172,12 @@ HITS=$(gcloud logging read "logName=\"projects/$(gcloud config get project 2>/de
   --limit=100 \
   --format='value(jsonPayload.connection.dest_ip,jsonPayload.connection.dest_port)' 2>>"$ERRORS")
 echo "  Google firewall hits, $WINDOW: $(grep -c . <<<"$HITS" || true)"
-if [ -n "$HITS" ] && grep -qvP '^1\.1\.1\.1\t443$' <<<"$HITS"; then STOP=1; fi
+if [ -n "$HITS" ] && grep -qvP '^1\.1\.1\.1\t443$' <<<"$HITS"; then stop_because "Google's firewall blocked something"; fi
 
 echo
-if [ "$STOP" -eq 1 ]; then
+if [ "${#REASONS[@]}" -gt 0 ]; then
   echo "STOP: stop the server first and investigate afterwards. See deploy/README.md, step 9."
+  printf '  Why: %s\n' "${REASONS[@]}"
   echo "  gcloud compute instances stop honeypot"
 else
   echo "Nothing that needs stopping."

@@ -25,7 +25,7 @@ use std::fs;
 use std::io;
 use std::net::{IpAddr, SocketAddr, TcpListener};
 use std::os::unix::fs::MetadataExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use crate::visit::unix_seconds;
@@ -100,16 +100,32 @@ pub fn check_address(address: SocketAddr, checklist_done: bool) -> io::Result<()
 ///
 /// The field has no `pub`, and the only way to make `Settings` is through `checked`. So
 /// the program can't listen anywhere that `check_address` hasn't approved.
+///
+/// `credentials` is the file of logins for the fake shell from Stage 7. With no file, the shell
+/// stays off and every login is rejected.
 #[derive(Debug)]
 pub struct Settings {
     listen: SocketAddr,
+    credentials: Option<PathBuf>,
 }
 
 impl Settings {
-    fn checked(listen: &str, checklist_done: bool) -> io::Result<Settings> {
+    fn checked(
+        listen: &str,
+        checklist_done: bool,
+        credentials: Option<PathBuf>,
+    ) -> io::Result<Settings> {
         let listen = parse_listen_address(listen)?;
         check_address(listen, checklist_done)?;
-        Ok(Settings { listen })
+        Ok(Settings {
+            listen,
+            credentials,
+        })
+    }
+
+    /// The file of logins for the fake shell, if there is one.
+    pub fn credentials(&self) -> Option<&Path> {
+        self.credentials.as_deref()
     }
 
     /// EXERCISE 3: read the settings from the command line.
@@ -139,6 +155,7 @@ impl Settings {
     pub fn from_args(args: &[String]) -> io::Result<Settings> {
         let mut listen = DEFAULT_LISTEN.to_string();
         let mut checklist_done = false;
+        let mut credentials = None;
         let mut args_iter = args.iter();
 
         while let Some(arg) = args_iter.next() {
@@ -153,13 +170,23 @@ impl Settings {
                 "--checklist-done" => {
                     checklist_done = true;
                 }
+                // Stage 7 adds this one. It takes the next argument, like `--listen`.
+                "--credentials" => {
+                    if let Some(path) = args_iter.next() {
+                        credentials = Some(PathBuf::from(path));
+                    } else {
+                        return Err(setting_error(
+                            "missing file after --credentials".to_string(),
+                        ));
+                    }
+                }
                 _ => {
                     return Err(setting_error(format!("unknown argument: {arg}")));
                 }
             }
         }
 
-        Settings::checked(&listen, checklist_done)
+        Settings::checked(&listen, checklist_done, credentials)
     }
 
     /// Starts listening at the address these settings allow.
@@ -376,7 +403,8 @@ mod tests {
     use std::time::Duration;
 
     // What the real program must never use. `unsafe` isn't here, because
-    // `#![forbid(unsafe_code)]` makes the compiler itself refuse it.
+    // `#![forbid(unsafe_code)]` makes the compiler itself refuse it. Stage 7 added the name
+    // lookups and web clients, because a fake shell full of URLs mustn't get anywhere near one.
     const FORBIDDEN: &[&str] = &[
         "std::process",
         "process::Command",
@@ -384,6 +412,12 @@ mod tests {
         ".connect(",
         "UdpSocket",
         "extern \"C\"",
+        "ToSocketAddrs",
+        "to_socket_addrs",
+        "reqwest::",
+        "ureq::",
+        "hyper::",
+        "curl::",
     ];
 
     // Documentation addresses. They're reserved, and they don't belong to anyone.
@@ -543,6 +577,24 @@ mod tests {
         let settings = Settings::from_args(&args("--listen 127.0.0.1:0")).unwrap();
         let listener = settings.open_listener().unwrap();
         assert!(listener.local_addr().unwrap().ip().is_loopback());
+    }
+
+    // Stage 7 added these two. They already pass, and they should never stop passing.
+    #[test]
+    fn guard_the_fake_shell_is_off_unless_you_ask() {
+        for text in ["", "--listen 0.0.0.0:2323 --checklist-done"] {
+            assert_eq!(
+                Settings::from_args(&args(text)).unwrap().credentials(),
+                None
+            );
+        }
+    }
+
+    #[test]
+    fn guard_reads_the_file_of_logins() {
+        let settings = Settings::from_args(&args("--credentials some/file.txt")).unwrap();
+        assert_eq!(settings.credentials(), Some(Path::new("some/file.txt")));
+        assert!(Settings::from_args(&args("--credentials")).is_err());
     }
 
     #[test]

