@@ -24,16 +24,19 @@ printable() {
   LC_ALL=C tr -cd '\11\12\40-\176'
 }
 
+mkdir -p "$LOG_DIR"
+
+# Delete old copies before anything else, so it still happens if the server can't be reached.
+find "$LOG_DIR" -name 'visits-*.jsonl' -mtime "+$KEEP_DAYS" -delete
+
 # Only copy what's changed since the newest copy here, with a day's overlap, because this counts
 # as outbound traffic too. With no copies yet, that's everything. Tar exits with 1 if today's log
 # grows while it's being read, which is harmless. A line cut off that way is skipped below, and
 # the next copy replaces it.
-mkdir -p "$LOG_DIR"
 NEWEST=$(find "$LOG_DIR" -name 'visits-*.jsonl' -printf '%T@\n' | sort -n | tail -n 1 | cut -d. -f1)
 COPY_SINCE=$((${NEWEST:-86400} - 86400))
 ssh honeypot "sudo tar -C /var/lib/honeypot/logs --newer-mtime=@$COPY_SINCE -cf - . || [ \$? -eq 1 ]" 2>>"$ERRORS" |
   tar -C "$LOG_DIR" --no-same-owner -xf -
-find "$LOG_DIR" -name 'visits-*.jsonl' -mtime "+$KEEP_DAYS" -delete
 
 echo "Honeypot summary, $(date -u '+%Y-%m-%d %H:%M') UTC"
 echo "Logs in $LOG_DIR: $(find "$LOG_DIR" -name 'visits-*.jsonl' | wc -l) file(s), $(du -sh "$LOG_DIR" | cut -f1)"
