@@ -1,5 +1,19 @@
 # Deploying to Google Cloud
 
+**Kill switch.** This closes the port right away. Afterwards, set `expose_fake_login = false`
+in `terraform.tfvars`, or the next `terraform apply` opens it again.
+
+```sh
+gcloud compute firewall-rules delete honeypot-fake-login --quiet
+```
+
+**Daily logs.** From the top of the repo, this copies the logs to your computer and prints a
+short summary.
+
+```sh
+deploy/daily-logs.sh
+```
+
 These are the commands for the Stage 6 checklist in the [main README](../README.md), in
 order. The fake login stays closed to the internet until step 8, so you can stop at any
 point before that and nothing is exposed.
@@ -212,6 +226,9 @@ folder out of git and cloud sync. The last line deletes copies on the same sched
 ssh honeypot 'sudo tar -C /var/lib/honeypot/logs -cf - .' | tar -C ~/honeypot-logs --no-same-owner -xf -
 find ~/honeypot-logs -name 'visits-*.jsonl' -mtime +30 -delete
 ```
+
+`deploy/daily-logs.sh` does all of this, then prints a short summary and tells you if anything
+means you should stop the server. It's meant to be run once a day.
 
 ## Updating the server
 

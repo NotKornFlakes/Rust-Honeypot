@@ -96,7 +96,7 @@ internet at first. The other fake services follow one at a time.
       internet, and it's setup rather than Rust. Finish this whole checklist first.
       [`deploy/README.md`](deploy/README.md) has the commands, in order:
   - **Permission**
-    - [ ] Ask Google in writing whether a research honeypot is allowed, and say that it
+    - [x] Ask Google in writing whether a research honeypot is allowed, and say that it
           records IP addresses and the passwords people type. Their
           [Acceptable Use Policy](https://cloud.google.com/terms/aup) doesn't mention
           honeypots, but it bars anything "invasive" and items of a "deceptive nature".
@@ -104,53 +104,68 @@ internet at first. The other fake services follow one at a time.
           you may not get an answer. Keep any reply. If the answer is no, use a different
           provider. If there's no answer, going ahead is your own decision and your own
           risk, so write down the date, what you read and why you went ahead
-    - [ ] Check the local rules for storing IP addresses and passwords, for both your
+      - **2026-11-01, going ahead without an answer.** I asked Google support on 2026-10-31
+        and never got a reply. I read the Acceptable Use Policy above. This is my own
+        judgment and my own risk, and I accept that Google may close the account. It's a
+        throwaway project, and the whole server can be rebuilt from Terraform
+    - [x] Check the local rules for storing IP addresses and passwords, for both your
           country and the server's. Write down how long you'll keep them, and set
           `KEEP_DAYS` to match
+      - **2026-11-01, keeping logs for 30 days.** `KEEP_DAYS` is 30. There was no
+        country-by-country legal review. The decision rests on these safeguards, each
+        checked that day against the running server and the code it was built from:
+        - Logs stay private on the server: the folder is `0700` and the files `0600`, so
+          only the `honeypot` user and root can read them, and the program refuses to start
+          otherwise
+        - Log files more than 30 days old are deleted, on the first visit of each new day
+          and whenever the program starts
+        - Passwords show as `(hidden)` in screen output, and the server discards that output
+        - Logs never go into git: `.gitignore` covers them, none are in the history, and
+          downloaded copies stay in `~/honeypot-logs`, outside the repo
   - **Isolation**
-    - [ ] Use a Google account and project with nothing else in them, a unique password
+    - [x] Use a Google account and project with nothing else in them, a unique password
           and 2-Step Verification. No connection to your home network or other projects,
           and no real credentials or personal data on the server
-    - [ ] Set a budget alert. [Free Tier](https://docs.cloud.google.com/free/docs/free-cloud-features)
+    - [x] Set a budget alert. [Free Tier](https://docs.cloud.google.com/free/docs/free-cloud-features)
           covers the e2-micro, 30 GB of standard disk and 1 GB of outbound traffic a month.
           It doesn't cover the [public IP address](https://cloud.google.com/vpc/network-pricing),
           at about $3.60 a month. An alert warns you, but it doesn't stop the spending
-    - [ ] In Google Cloud's firewall, open only the fake service's port, plus the admin
+    - [x] In Google Cloud's firewall, open only the fake service's port, plus the admin
           port from Google's IAP range alone
-    - [ ] Block outbound traffic twice: with a firewall rule, and on the server itself
+    - [x] Block outbound traffic twice: with a firewall rule, and on the server itself
           with `nftables`, allowing only replies to incoming connections and what the
           server needs from its own metadata server. Google's
           [firewall rules](https://docs.cloud.google.com/firewall/docs/firewalls) don't
           apply to that traffic. Install what you need first, then close both, and test
           each one alone to prove an outbound connection really fails
-    - [ ] Keep admin access separate from the fake services: an IAP tunnel, so the public
+    - [x] Keep admin access separate from the fake services: an IAP tunnel, so the public
           IP shows no admin port, its own SSH key used nowhere else, and no password logins
-    - [ ] Give the server no service account, so it has no Google Cloud permissions
-    - [ ] Use IPv4 only. The program refuses to listen on IPv6
-    - [ ] Leave snapshots, flow logs and the Ops Agent off, so logs aren't copied somewhere
+    - [x] Give the server no service account, so it has no Google Cloud permissions
+    - [x] Use IPv4 only. The program refuses to listen on IPv6
+    - [x] Leave snapshots, flow logs and the Ops Agent off, so logs aren't copied somewhere
           your retention plan can't reach
   - **Running it**
     - [x] Install `cargo audit` with `cargo install cargo-audit`, run it on your own
           computer, and deal with anything it finds. Then build with
           `cargo build --release --target x86_64-unknown-linux-musl`, which runs on any
           x86-64 Linux server
-    - [ ] Upload the program and run it as an unprivileged user with no other access. Use
+    - [x] Upload the program and run it as an unprivileged user with no other access. Use
           `nftables` to forward the public port to 2323, instead of running it as root
-    - [ ] Run it under systemd with `--listen 0.0.0.0:2323 --checklist-done`. Set memory,
+    - [x] Run it under systemd with `--listen 0.0.0.0:2323 --checklist-done`. Set memory,
           CPU and task limits, no new privileges, a read-only filesystem except for
           `logs/`, and a restart if it fails
-    - [ ] Make sure the disk has room for `KEEP_DAYS` days of the daily log budget (3 GB
+    - [x] Make sure the disk has room for `KEEP_DAYS` days of the daily log budget (3 GB
           by default), with space to spare
-    - [ ] Copy logs off by pulling them over admin access, so the server never sends
+    - [x] Copy logs off by pulling them over admin access, so the server never sends
           anything out. Keep the copies private, and delete them on the same schedule
-    - [ ] To update the server, reinstall it from a fresh image instead of leaving outbound
+    - [x] To update the server, reinstall it from a fresh image instead of leaving outbound
           traffic open
   - **Stopping it**
-    - [ ] Practise your emergency stop before the port opens:
+    - [x] Practise your emergency stop before the port opens:
           `gcloud compute instances stop honeypot`, or Stop in the Cloud Console. It keeps
           the disk, so you can investigate afterwards. `terraform destroy` removes the
           server and its logs, and deleting the project ends everything for good
-    - [ ] Decide when you'll use it. Any outbound attempt by the honeypot, any other
+    - [x] Decide when you'll use it. Any outbound attempt by the honeypot, any other
           unexplained outbound traffic or an abuse report from Google means stop first and
           investigate afterwards
     - [ ] Start with the fake login only, and check the logs for a day
