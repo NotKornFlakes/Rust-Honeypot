@@ -221,7 +221,7 @@ internet at first. The other fake services follow one at a time.
     - [x] Decide when you'll use it. Any outbound attempt by the honeypot, any other
           unexplained outbound traffic or an abuse report from Google means stop first and
           investigate afterwards
-    - [ ] Start with the fake login only, and check the logs for a day
+    - [x] Start with the fake login only, and check the logs for a day
 
 ### After going live
 
