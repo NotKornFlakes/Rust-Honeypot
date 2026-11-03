@@ -145,7 +145,7 @@ internet at first. The other fake services follow one at a time.
       Refusing to run as root. A limit on visits per IP each minute. Tests that fail if
       the code ever starts a program, connects out or uses UDP, and a compiler ban on
       `unsafe`. `.parse()`, `map_err`, `while let`, slicing text, `.any(...)`
-- [ ] **Stage 6: Going live on a Google Cloud e2-micro**: the only stage that faces the
+- [x] **Stage 6: Going live on a Google Cloud e2-micro**: the only stage that faces the
       internet, and it's setup rather than Rust. Finish this whole checklist first.
       [`deploy/README.md`](deploy/README.md) has the commands, in order:
   - **Permission**
@@ -258,7 +258,7 @@ only once its tests and the safety checks pass.
           clippy` and `cargo audit` have nothing new to say
     - [x] Try it on localhost, as described above
     - [x] Review all the changes. Nothing in this stage touches the server until you decide it does
-    - [ ] Finish Stage 6, including the day of checking the logs with the fake login only
+    - [x] Finish Stage 6, including the day of checking the logs with the fake login only
     - [x] Decide again about Google's terms. What you asked them, and the decision written down in
           Stage 6, covered a login that always says no. A fake login that says yes and records
           commands is a bigger step towards "deceptive", so write down the date, what you read and
