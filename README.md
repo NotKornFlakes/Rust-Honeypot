@@ -236,6 +236,16 @@ only once its tests and the safety checks pass.
   - The login list is a file passed with `--credentials`. Without that flag the shell is off and
     every login is rejected, so the code can be finished and tested without changing the server
   - Commands are matched as text. Replies are fixed, and never repeat anything that was typed
+    - **2026-11-03, why `echo SHELL_TEST` gets its own reply.** In the shell's first 30 minutes, one
+      IP tried 21 different logins, once each and one at a time, and 11 of them got in. In each of
+      those sessions it sent only `echo SHELL_TEST`, and the shell replied with a blank line (`\r\n`),
+      the fixed reply to any `echo`. It hung up and went on to its next login, and tried no
+      downloads. The hypothesis is that it was checking for `SHELL_TEST` to come back, didn't see it
+      and decided this wasn't a real shell. That isn't proven, because a bot that only tests logins
+      and reports them elsewhere would look the same. To test it, Exercise 13 gives that one exact
+      command the fixed reply `SHELL_TEST\r\n`, which is still text built into the program, and any
+      other `echo` still gets the blank line. If this bot sends more commands once it sees the word,
+      the reply was the reason. If it still hangs up, it wasn't
   - Every command and download address goes in the visit's log line, with the same 30-day
     deletion. The screen and the daily summary show only how many there were
   - A download (`wget`, `curl`, `tftp`, `ftpget`, or a URL anywhere) gets a believable failure. The

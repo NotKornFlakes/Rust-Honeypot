@@ -25,9 +25,10 @@
 //!
 //! Do the exercises in order, replacing each `todo!()`. Run one exercise's tests with
 //! `cargo test fake_shell::tests::ex1_`. The `_` matters, because without it `ex1` also matches
-//! `ex10`, `ex11` and `ex12`. Run all of Stage 7 with `cargo test fake_shell`.
+//! `ex10` to `ex13`. Run all of Stage 7 with `cargo test fake_shell`.
 //! Exercise 9 is in `src/server.rs`, next to the `TimeLimited` it's modelled on, and its tests
-//! are in this file with the others.
+//! are in this file with the others. Exercise 13 came later, from what the first visitors did.
+//! It's one new entry in `CANNED`, so it has no `todo!()`, and its tests fail until you add it.
 //!
 //! The tests named `guard_` already pass, and they should never stop passing. They protect
 //! the safety rules, whatever else changes.
@@ -127,6 +128,20 @@ pub const CANNED: &[(&str, &str)] = &[
     ),
     ("cat", "cat: can't open file: No such file or directory\r\n"),
     ("busybox", "busybox: applet not found\r\n"),
+    // EXERCISE 13: give one bot's check the word it's looking for.
+    //
+    // The README has the whole story. The first bot to log in sent `echo SHELL_TEST`, got the
+    // blank line below and hung up, 11 times. The likeliest reason is that it was waiting to see
+    // `SHELL_TEST` come back, and it never could.
+    //
+    // Add one entry to this list: the command `echo SHELL_TEST`, with the reply `SHELL_TEST\r\n`.
+    // Where it goes matters, because of the rule at the top of this list.
+    //
+    // The new idea is the difference between repeating text and happening to match it. This reply
+    // is fixed text built into the program, so it's still `&'static str`, and the compiler is
+    // still what stops a visitor's words coming back. `echo ANYTHING_ELSE` still gets the blank
+    // line. A real `echo` that sends back whatever was typed wouldn't compile here, and that's
+    // the point.
     ("echo", "\r\n"),
     // These print nothing when they work, so printing nothing looks right. None of them do
     // anything either.
@@ -1420,6 +1435,49 @@ mod tests {
         }
     }
 
+    // Exercise 13 gives one exact command its own reply. Any other `echo` gets the same blank line,
+    // so that one entry can't turn into a way of getting text sent back.
+    #[test]
+    fn guard_echo_never_repeats_what_was_typed() {
+        for word in [
+            "ANYTHING_ELSE",
+            MARKER,
+            "SHELL_TEST2",
+            "XSHELL_TEST",
+            "shell_test",
+        ] {
+            let typed = format!("echo {word}");
+            let reply = canned_reply(&typed);
+            assert_eq!(reply, reply_for("echo"), "{typed}");
+            assert!(!reply.contains(word), "{typed}");
+
+            let (_, sent) = session_for(&format!("{typed}\nexit\n"));
+            assert!(!sent.contains(word), "{typed}");
+        }
+    }
+
+    // Extra words still match a key, as they do for every command, but they never come back.
+    #[test]
+    fn guard_words_after_the_checked_word_are_never_sent_back() {
+        let (_, sent) = session_for("echo SHELL_TEST ANYTHING_ELSE\nexit\n");
+        assert!(!sent.contains("ANYTHING_ELSE"));
+    }
+
+    // A visitor's text only lasts as long as their connection. If a reply could ever borrow from
+    // it, or the list could hold anything but text built into the program, this stops compiling,
+    // and every test fails with it.
+    #[test]
+    fn guard_replies_are_always_text_built_into_the_program() {
+        let list: &'static [(&'static str, &'static str)] = CANNED;
+        assert!(!list.is_empty());
+
+        let reply: &'static str = {
+            let typed = String::from("echo ANYTHING_ELSE");
+            canned_reply(&typed)
+        };
+        assert!(!reply.contains("ANYTHING_ELSE"));
+    }
+
     #[test]
     fn guard_a_budget_counts_what_is_spent() {
         let mut budget = ShellBudget::new(100, 1000, 10);
@@ -2599,5 +2657,30 @@ mod tests {
 
         assert_eq!(visit.username, None);
         assert_eq!(visit.telnet.as_deref(), Some(""));
+    }
+
+    #[test]
+    fn ex13_the_bots_check_gets_its_word_back() {
+        assert_eq!(canned_reply("echo SHELL_TEST"), "SHELL_TEST\r\n");
+    }
+
+    // This is what the bot did: log in, send the one command and hang up.
+    #[test]
+    fn ex13_a_bot_that_logs_in_and_hangs_up_sees_the_word() {
+        let (visit, sent) = visit_for("root\r\nroot\r\necho SHELL_TEST\r\n");
+        assert_eq!(sent, format!("{LOGGED_IN}SHELL_TEST\r\n# "));
+
+        let session = session_of(&visit);
+        assert_eq!(session.commands, ["echo SHELL_TEST"]);
+        assert_eq!(session.ended, SessionEnd::Left);
+        assert_eq!(session.reply_bytes, "# SHELL_TEST\r\n# ".len());
+    }
+
+    #[test]
+    fn ex13_works_with_a_path_or_in_a_chain() {
+        assert_eq!(canned_reply("/bin/echo SHELL_TEST"), "SHELL_TEST\r\n");
+
+        let (_, sent) = session_for("sh; echo SHELL_TEST\nexit\n");
+        assert_eq!(sent, "# SHELL_TEST\r\n# ");
     }
 }
