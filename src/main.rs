@@ -5,6 +5,7 @@
 #![forbid(unsafe_code)]
 
 use std::env;
+use std::fs;
 use std::io;
 use std::path::Path;
 use std::thread;
@@ -12,6 +13,9 @@ use std::time::Duration;
 
 use honeypot::deploy::{
     MAX_TRACKED_ADDRESSES, MAX_VISITS_PER_MINUTE, RateLimit, Settings, current_uid, refuse_root,
+};
+use honeypot::fake_shell::{
+    Credentials, MAX_SHELL_BYTES_PER_DAY, MAX_SHELL_BYTES_PER_IP, ShellBudget,
 };
 use honeypot::log_files::{DailyLog, today};
 use honeypot::login::TIMEOUT;
@@ -26,13 +30,28 @@ fn main() -> io::Result<()> {
 
     // `skip(1)` leaves out the program's own name, like `sys.argv[1:]` in Python.
     let args: Vec<String> = env::args().skip(1).collect();
-    let listener = Settings::from_args(&args)?.open_listener()?;
+    let settings = Settings::from_args(&args)?;
+    let listener = settings.open_listener()?;
 
     // This refuses to start if other users could read the logs.
     let log = DailyLog::open(Path::new(LOG_DIR), today())?;
     let limits = Limits::new(MAX_CONNECTIONS, MAX_PER_IP);
     let rate = RateLimit::new(MAX_VISITS_PER_MINUTE, MAX_TRACKED_ADDRESSES);
-    let shared = Shared::new(log, limits, MAX_LOG_BYTES_PER_DAY, TIMEOUT)?.with_rate_limit(rate);
+    let mut shared =
+        Shared::new(log, limits, MAX_LOG_BYTES_PER_DAY, TIMEOUT)?.with_rate_limit(rate);
+
+    // The fake shell from Stage 7 stays off unless you ask for it. If the list can't be read or
+    // has a mistake in it, the program refuses to start, so you find out straight away.
+    if let Some(path) = settings.credentials() {
+        let credentials = Credentials::parse(&fs::read_to_string(path)?)?;
+        println!("Fake shell on, for {} login(s).", credentials.count());
+        let budget = ShellBudget::new(
+            MAX_SHELL_BYTES_PER_IP,
+            MAX_SHELL_BYTES_PER_DAY,
+            MAX_TRACKED_ADDRESSES,
+        );
+        shared = shared.with_fake_shell(credentials, budget);
+    }
 
     println!("Fake login listening on {}.", listener.local_addr()?);
     println!("Press Ctrl+C to stop.");

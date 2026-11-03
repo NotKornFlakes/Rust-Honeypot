@@ -166,8 +166,9 @@ pub fn ask(prompt: &str, reader: &mut impl BufRead, writer: &mut impl Write) -> 
 /// The new idea is `Ok(...)`: when a function returns a `Result`, wrap the value
 /// in `Ok(...)` to say it worked.
 ///
-/// This login always says no. Never add a way to succeed, because there's nothing
-/// real to log in to. That's safety rule 1 in the README.
+/// This login always says no, because there's nothing real to log in to. Stage 7 adds
+/// logins that succeed, in its own code and only into a shell that's entirely fake.
+/// That's safety rule 1 in the README.
 pub fn fake_login(reader: &mut impl BufRead, writer: &mut impl Write) -> io::Result<LoginAttempt> {
     let username = ask(LOGIN_PROMPT, reader, writer)?;
     let password = ask(PASSWORD_PROMPT, reader, writer)?;

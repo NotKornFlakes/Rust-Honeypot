@@ -341,7 +341,12 @@ pub fn screen_line(visit: &Visit) -> String {
     } else {
         "(none)"
     };
-    format!("{date} {outcome:?} from {ip} user={username} password={password}")
+    let line = format!("{date} {outcome:?} from {ip} user={username} password={password}");
+    // Stage 7: a session only ever shows as counts, never what was typed.
+    match &visit.shell {
+        Some(session) => format!("{line} {}", session.screen_summary()),
+        None => line,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -417,6 +422,8 @@ mod tests {
             outcome: Outcome::Attempted,
             username: Some("admin".to_string()),
             password: Some("hunter2".to_string()),
+            telnet: None,
+            shell: None,
         }
     }
 

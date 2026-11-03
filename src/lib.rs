@@ -7,6 +7,7 @@
 #![forbid(unsafe_code)]
 
 pub mod deploy;
+pub mod fake_shell;
 pub mod log_files;
 pub mod login;
 pub mod server;

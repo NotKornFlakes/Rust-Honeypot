@@ -22,7 +22,7 @@
 #![allow(dead_code, unused_variables, unused_imports)]
 
 use std::collections::HashMap;
-use std::io::{self, BufReader, Read};
+use std::io::{self, BufReader, Read, Write};
 use std::net::{IpAddr, TcpListener, TcpStream};
 use std::sync::mpsc::{SyncSender, sync_channel};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -32,6 +32,7 @@ use std::time::{Duration, Instant, SystemTime};
 use chrono::NaiveDate;
 
 use crate::deploy::{RateLimit, current_minute};
+use crate::fake_shell::{Credentials, SessionEnd, ShellBudget, TELNET_OPENING, TelnetFilter};
 use crate::log_files::{DailyLog, screen_line, today};
 use crate::visit::{Outcome, Visit, append_visit, outcome_of_error};
 
@@ -156,6 +157,89 @@ pub fn run_visit(visit: &mut Visit, stream: &TcpStream, time_limit: Duration) {
     visit.run_fake_login(&mut reader, &mut writer);
     if reader.get_ref().timed_out {
         visit.outcome = Outcome::TimedOut;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Stage 7: the same time limit for writing
+// ---------------------------------------------------------------------------
+
+/// A connection you can write to until a deadline.
+///
+/// The comment on `run_visit` says replies are tiny, so writing can't hold a place open for
+/// long. The fake shell sends much more than that, so here the deadline covers writing as well.
+pub struct WriteLimited<'a> {
+    stream: &'a TcpStream,
+    deadline: Instant,
+}
+
+impl<'a> WriteLimited<'a> {
+    pub fn new(stream: &'a TcpStream, deadline: Instant) -> WriteLimited<'a> {
+        WriteLimited { stream, deadline }
+    }
+}
+
+/// STAGE 7, EXERCISE 9: write only until the deadline. The tests are in `src/fake_shell.rs`, so
+/// run them with `cargo test fake_shell::tests::ex9`.
+///
+/// A socket's write timeout is measured from the start of each write. Someone who reads one
+/// byte at a time, just often enough, could keep `write_all` going for a very long time. So
+/// each write gets only the time that's left, the same way `Read for TimeLimited` does above.
+///
+/// The new idea is implementing a trait from the standard library that has a method you don't
+/// write. `Write` provides `write_all` for free, as long as you provide `write` and `flush`.
+///
+/// Do these in order:
+/// 1. `match` on `time_left(self.deadline, Instant::now())`.
+/// 2. If that's `None`, return `Err(io::ErrorKind::TimedOut.into())`, and send nothing.
+/// 3. If there's time `left`, call `self.stream.set_write_timeout(Some(left))?`, and then write
+///    the bytes.
+///
+/// Hint: writing needs a `mut` handle, even though it only changes the connection and not the
+/// reference. So write `let mut stream = self.stream;` and then `stream.write(bytes)`, as
+/// `let mut writer = stream;` does in `run_visit`.
+impl Write for WriteLimited<'_> {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        match time_left(self.deadline, Instant::now()) {
+            None => Err(io::ErrorKind::TimedOut.into()),
+            Some(left) => {
+                self.stream.set_write_timeout(Some(left))?;
+                let mut stream = self.stream;
+                stream.write(bytes)
+            }
+        }
+    }
+
+    // Nothing is held back in this type, so there's nothing to flush.
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+// This is a worked example for Stage 7. It's `run_visit` with the fake shell behind the login.
+// The reader and the writer share a single deadline, which starts when the visit does, so
+// getting past the login doesn't start the clock again. It speaks telnet first, as a real device
+// does, and `TelnetFilter` keeps the answers out of what the visitor typed. `run_visit` above does
+// neither, so a server without the shell behaves exactly as it did before Stage 7.
+pub fn run_shell_visit(
+    visit: &mut Visit,
+    stream: &TcpStream,
+    time_limit: Duration,
+    credentials: &Credentials,
+) {
+    let limited = TimeLimited::new(stream, time_limit);
+    let mut writer = WriteLimited::new(stream, limited.deadline);
+    let mut reader = BufReader::new(TelnetFilter::new(limited));
+    match writer.write_all(TELNET_OPENING) {
+        Ok(()) => visit.run_login_or_shell(&mut reader, &mut writer, credentials),
+        Err(error) => visit.outcome = outcome_of_error(&error),
+    }
+    visit.telnet = Some(reader.get_ref().negotiation_as_hex());
+    if reader.get_ref().inner().timed_out {
+        match &mut visit.shell {
+            Some(session) => session.ended = SessionEnd::TimedOut,
+            None => visit.outcome = Outcome::TimedOut,
+        }
     }
 }
 
@@ -371,6 +455,13 @@ pub struct Shared {
     screen: SyncSender<String>,
     time_limit: Duration,
     rate: Option<Arc<Mutex<RateLimit>>>,
+    shell: Option<Arc<FakeShell>>,
+}
+
+/// What the threads share for the fake shell from Stage 7.
+struct FakeShell {
+    credentials: Credentials,
+    budget: Mutex<ShellBudget>,
 }
 
 // This is a worked example, not an exercise. Printing can get stuck, for example if the
@@ -405,6 +496,7 @@ impl Shared {
             screen: start_screen_thread()?,
             time_limit,
             rate: None,
+            shell: None,
         })
     }
 
@@ -412,6 +504,34 @@ impl Shared {
     pub fn with_rate_limit(mut self, rate: RateLimit) -> Shared {
         self.rate = Some(Arc::new(Mutex::new(rate)));
         self
+    }
+
+    /// Turns on the fake shell from Stage 7. Without this, every login is rejected.
+    pub fn with_fake_shell(mut self, credentials: Credentials, budget: ShellBudget) -> Shared {
+        self.shell = Some(Arc::new(FakeShell {
+            credentials,
+            budget: Mutex::new(budget),
+        }));
+        self
+    }
+
+    // Gives back the list of logins if the shell is on and this address still has room.
+    fn shell_open_for(&self, ip: IpAddr) -> Option<&Credentials> {
+        let shell = self.shell.as_ref()?;
+        if lock(&shell.budget).has_room(ip, today()) {
+            Some(&shell.credentials)
+        } else {
+            None
+        }
+    }
+
+    // A session costs what its log line takes up plus what it sent back.
+    fn charge_for_session(&self, visit: &Visit) {
+        if let (Some(shell), Some(session)) = (&self.shell, &visit.shell) {
+            let logged = visit.to_json_line().map_or(0, |line| line.len());
+            let cost = (logged + session.reply_bytes) as u64;
+            lock(&shell.budget).spend(visit.source_ip, today(), cost);
+        }
     }
 
     fn over_rate_limit(&self, ip: IpAddr) -> bool {
@@ -465,7 +585,11 @@ pub fn handle_visit(stream: &TcpStream, ip: IpAddr, shared: &Shared) {
     }
 
     let mut visit = Visit::new(SystemTime::now(), ip);
-    run_visit(&mut visit, stream, shared.time_limit);
+    match shared.shell_open_for(ip) {
+        Some(credentials) => run_shell_visit(&mut visit, stream, shared.time_limit, credentials),
+        None => run_visit(&mut visit, stream, shared.time_limit),
+    }
+    shared.charge_for_session(&visit);
 
     match write_to_log(&visit, shared) {
         Ok(true) => {}
