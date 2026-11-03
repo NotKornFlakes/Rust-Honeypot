@@ -288,7 +288,7 @@ only once its tests and the safety checks pass.
   - **Deploying**
     - [ ] Follow "Turning on the fake shell" in [`deploy/README.md`](deploy/README.md), which
           reinstalls the server. It keeps the port closed until the end
-    - [ ] On the server, check that nothing outside the program's folder can be run, and practise
+    - [x] On the server, check that nothing outside the program's folder can be run, and practise
           turning the shell off on its own, both before the port opens
     - [ ] From outside, check that a listed login gets the shell, another login is rejected, a fake
           `wget` fails and is logged, and 22 and 2323 are still closed
@@ -298,6 +298,12 @@ only once its tests and the safety checks pass.
     - [ ] Check the logs for a day, as you did for the fake login. Compare "Sent nothing at all" in
           the daily summary with the days before. If most visitors still send nothing, the opening
           wasn't the reason, and the shell will keep seeing very few logins
+      - **2026-11-03, the baseline to compare against.** The last 24 hours of the fake login alone,
+        as of 00:59 UTC: 520 visits from 117 IPs, and 425 of them (82%) sent nothing at all. The
+        silent retry pattern line read 11 IPs and 241 visits, and all 11 only stayed silent. 81 tried
+        a login, which also counts HTTP and binary probes. Google counted 3.8 MB sent, about 3 MB of
+        which was a test send. If the opening works, those bots may log in straight away and drop out
+        of the retry line, so read a fall in that line together with logins rising
   - **Stopping it**
     - [x] Add these to the rules from Stage 6. Each one means stop first and investigate
           afterwards, and `deploy/daily-logs.sh` checks the first four:

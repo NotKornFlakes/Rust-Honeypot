@@ -209,10 +209,12 @@ nc -z -w 5 "$IP" 2323 && echo 'OPEN: STOP' || echo closed
 Any `egress-blocked-honeypot` line, or any hit in the cloud firewall's log, means stop the
 server first and investigate afterwards. So does an `egress-blocked` line that isn't on your
 list from step 6. The exception is your own test from step 5, which shows up in the cloud
-firewall's log as a connection to 1.1.1.1 on port 443.
+firewall's log as a connection to 1.1.1.1 on port 443. The first command asks for kernel messages
+by `_TRANSPORT=kernel` instead of `-k`, because `-k` only looks at the current boot, so a reboot
+would hide anything from before it.
 
 ```sh
-ssh honeypot "sudo journalctl -k --since '1 day ago' --grep egress-blocked --no-pager"
+ssh honeypot "sudo journalctl _TRANSPORT=kernel --since '1 day ago' --grep egress-blocked --no-pager"
 gcloud logging read "logName=\"projects/$(gcloud config get project)/logs/compute.googleapis.com%2Ffirewall\"" \
   --freshness=1d --limit=20
 ```
@@ -226,8 +228,8 @@ This is for Stage 7. Only do it once everything under "Before it goes on the ser
 [main README](../README.md) is ticked. Until then, the server keeps running the fake login on its
 own, and nothing else changes.
 
-Start with "Updating the server" below, which closes the port and reinstalls the server, so copy
-the logs off first. Build the program the same way as in Stage 6. At step 4, upload two more files:
+Start with "Updating the server" below, which closes the port, copies the logs off and reinstalls
+the server. Build the program the same way as in Stage 6. At step 4, upload two more files:
 
 ```sh
 scp target/x86_64-unknown-linux-musl/release/honeypot \
@@ -308,8 +310,35 @@ once a day.
 
 ## Updating the server
 
-Reinstall it from a fresh image, which also deletes the logs on it, so copy them off first. In
-`terraform.tfvars`, set `allow_setup_egress = true` and `expose_fake_login = false`, then:
+Reinstall it from a fresh image, which also deletes the logs on it, so copy them off first. Follow
+this order, so that nothing gets lost.
+
+Close the port first, because today's log keeps growing while it's open. In `terraform.tfvars`, set
+`expose_fake_login = false`, then run `terraform apply`. Wait a minute for the last visits to end,
+since a visit lasts at most 30 seconds.
+
+Copy everything off, as in "Copying logs off" below, and check every copy against the server. Each
+file should say `OK`. Don't go on until they all do, because the reinstall deletes the originals.
+
+```sh
+(umask 077; mkdir -p ~/honeypot-logs)
+ssh honeypot 'sudo tar -C /var/lib/honeypot/logs -cf - .' | tar -C ~/honeypot-logs --no-same-owner -xf -
+ssh honeypot "sudo sh -c 'cd /var/lib/honeypot/logs && sha256sum visits-*.jsonl'" | (cd ~/honeypot-logs && sha256sum -c -)
+```
+
+Now rename your copy of today's log. The new server starts its own log with today's date, the same
+filename, and the next copy would replace yours with it. The new name still starts with `visits-`,
+so it's deleted on the same schedule. The daily summary only reads logs named exactly by date, so
+it leaves these visits out.
+
+```sh
+TODAY=$(date -u +%F)
+[ ! -e ~/honeypot-logs/visits-$TODAY.jsonl ] ||
+  mv -n ~/honeypot-logs/visits-$TODAY.jsonl ~/honeypot-logs/visits-$TODAY-old-server-$(date -u +%H%M%S).jsonl
+ls ~/honeypot-logs
+```
+
+Then, in `terraform.tfvars`, set `allow_setup_egress = true`, and reinstall:
 
 ```sh
 terraform apply -replace=google_compute_instance.honeypot

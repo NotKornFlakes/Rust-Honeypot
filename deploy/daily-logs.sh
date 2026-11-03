@@ -142,7 +142,8 @@ echo "Crashes during a visit: $(sudo journalctl -u honeypot _TRANSPORT=stdout --
 echo "Other programs run by the honeypot user: $(ps -u honeypot -o comm= | grep -cvx honeypot)"
 echo "Its files outside the logs folder: $(sudo find / -xdev -user honeypot -not -path /var/lib/honeypot -not -path '/var/lib/honeypot/*' 2>/dev/null | wc -l)"
 
-sudo journalctl -k --since "@$since" --no-pager -o cat --grep egress-blocked |
+# Not `-k`, which only looks at the current boot, so a reboot would hide anything from before it.
+sudo journalctl _TRANSPORT=kernel --since "@$since" --no-pager -o cat --grep egress-blocked |
   awk '{
     who = /egress-blocked-honeypot:/ ? "honeypot" : "other"
     kind = / SYN / ? "connect" : (/PROTO=UDP/ ? "udp" : "other")
