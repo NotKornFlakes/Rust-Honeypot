@@ -286,13 +286,13 @@ only once its tests and the safety checks pass.
         open the address, but I never submit to it
     - [x] Read `deploy/host/credentials.txt`, and check that it holds only common factory defaults
   - **Deploying**
-    - [ ] Follow "Turning on the fake shell" in [`deploy/README.md`](deploy/README.md), which
+    - [x] Follow "Turning on the fake shell" in [`deploy/README.md`](deploy/README.md), which
           reinstalls the server. It keeps the port closed until the end
     - [x] On the server, check that nothing outside the program's folder can be run, and practise
           turning the shell off on its own, both before the port opens
-    - [ ] From outside, check that a listed login gets the shell, another login is rejected, a fake
+    - [x] From outside, check that a listed login gets the shell, another login is rejected, a fake
           `wget` fails and is logged, and 22 and 2323 are still closed
-    - [ ] Check that outbound is still blocked with the shell on, and that the fake `wget` left no
+    - [x] Check that outbound is still blocked with the shell on, and that the fake `wget` left no
           `egress-blocked-honeypot` line behind it. Leave `nftables` running for this. Step 5 turns
           it off for a moment, which is only safe while the port is closed
     - [ ] Check the logs for a day, as you did for the fake login. Compare "Sent nothing at all" in
