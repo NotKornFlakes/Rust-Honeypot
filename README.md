@@ -1,6 +1,6 @@
 # Rust Telnet Honeypot
 
-By [Timothy Fletcher](https://timfletcher.tech/honeypot/)
+By [Timothy Fletcher](https://timfletcher.tech)
 
 A medium-interaction telnet honeypot written in Rust, run on Google Cloud for 86 hours to
 record what IoT botnets do after they log in. 18 common factory-default logins get into a
@@ -20,8 +20,6 @@ and that guide is below, under "How it was built".
 Read [the full report](README_REPORT.md) or visit [the project page](https://timfletcher.tech/honeypot/).
 
 ## How it was built
-
-# honeypot: learning Rust by building a research honeypot
 
 A small program that pretends to be a login prompt, a shell and other services, then
 records what people try against it. It's for research only: the goal is to study
