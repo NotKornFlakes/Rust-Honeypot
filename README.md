@@ -317,9 +317,9 @@ only once its tests and the safety checks pass.
       - **2026-11-06, the result.** The first 24 hours with the shell on, from 01:29:49 UTC on
         2026-11-03 and leaving out my own visits: 713 visits from 121 IPs, and 99 of them (14%)
         sent nothing at all, down from 82%. 533 answered the telnet opening and 123 got into the
-        shell. The retry line read 0 IPs, but none of the 11 baseline retry IPs came back, most
-        likely because the reinstall changed the public IP, so the opening is still untested on
-        them. Leaving those 11 out of the baseline still gives 66% silent, and the 7 IPs seen both
+        shell. The retry line read 0 IPs, but none of the 11 baseline retry IPs came back, even
+        though the public IP stayed the same, so the opening is still untested on them. Leaving
+        those 11 out of the baseline still gives 66% silent, and the 7 IPs seen both
         before and after went from 40% silent to 8%. The daily summary found nothing that needs
         stopping. From the opening to 2026-11-06 there were no restarts, crashes or program
         errors, no blocked outbound lines apart from the 1.1.1.1:443 self-test, no hits in

@@ -185,7 +185,7 @@ gcloud compute instances start honeypot
 ssh honeypot systemctl is-active nftables honeypot
 ```
 
-The public IP changes each time the server stops, which doesn't matter yet. `terraform apply`
+The public IP can change each time the server stops, which doesn't matter yet. `terraform apply`
 updates it in the output. The server may also need a moment to accept `ssh` after starting.
 
 ## 8. Open the fake login
