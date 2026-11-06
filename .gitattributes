@@ -1,0 +1,6 @@
+# Notebook outputs hold log data, so git stores notebooks with their outputs stripped. The filter
+# is defined in .git/config, which a clone doesn't copy, so set it up before committing a notebook:
+#   git config filter.strip-notebook-output.clean "jq --indent 1 -f analysis/strip-outputs.jq"
+#   git config filter.strip-notebook-output.smudge cat
+#   git config filter.strip-notebook-output.required true
+*.ipynb filter=strip-notebook-output
