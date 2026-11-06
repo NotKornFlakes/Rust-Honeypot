@@ -11,9 +11,9 @@
   attempts to download and run malware. None of them produced an outbound connection. Most bots
   followed the same playbook, mapped below to MITRE ATT&CK.
 - **What it shows:** a fixed-reply shell is safe but easy to spot. Almost every bot that checked
-  for its own marker word left before the payload stage. Silent visitors fell from 82% to 12%
-  after the server began opening with telnet negotiation, but the IP address changed at the same
-  moment, so that cause isn't proven.
+  for its own marker word left before the payload stage. Silent visitors fell from 82% to 12% after
+  the server began opening with telnet negotiation. The IP address stayed the same, but almost none
+  of the earlier visitors came back and the baseline is one day, so that cause isn't proven.
 
 | Headline | Value |
 | --- | --- |
@@ -191,14 +191,15 @@ release starts every connection with the negotiation a small device would send.
 
 Silent visits stayed between 8% and 13% on each calendar day.
 
-**The caveat.** Turning on the shell meant reinstalling the server, and the reinstall gave it a
-new public IP address. None of the 11 retry IPs ever reached the new address, so for the bots that
-motivated the change, the result is unknown. The rest of the visitor population also changed at
-the same moment as the behaviour: only 7 of the 117 IPs from the day before were seen again.
-Those 7 point the same way, but 7 is too few to carry the claim, and the baseline is a single
-day. What the data supports: silent
+**The caveat.** Turning on the shell meant reinstalling the server, but it kept the same public IP
+address. The rebuilt server briefly had another address, and its restart before the port reopened
+gave the original back. So a change of address doesn't explain the result. Two limits remain.
+First, the visitors changed: only 7 of the 117 IPs from the day before were seen again. Those 7
+went from 40% silent to 8%, which points the same way, but 7 is too few to carry the claim. Second,
+the baseline is a single day. The 11 retry IPs never came back, even though the address was the
+same, so the hypothesis about those bots specifically is untested. What the data supports: silent
 visits fell sharply after the change and stayed low for four days. The opening is the likeliest
-cause, but this setup can't separate it from the new address.
+cause, but this setup can't rule out a change in who was visiting.
 
 ## Detection ideas
 
@@ -318,8 +319,8 @@ telnet_in
   hashes, and family names rest on the bots' own strings.
 - **Time wasted isn't measured.** Each log line records when a visit started, not when it ended.
   The 30-second cap gives an upper bound, and 192 sessions ran into it.
-- **The telnet result is confounded** by the change of address, as described above, and its
-  baseline is one day.
+- **The telnet result is confounded** by visitor turnover, as described above, and its baseline is
+  one day.
 - **Monitoring is daily, not continuous.** The STOP checks run when the daily script runs. Logs
   stay on the server until they're copied, and there's no separate log collector.
 - **Data handling** decisions (30-day retention, private storage, masking before anything is
@@ -329,11 +330,12 @@ telnet_in
 ## Next steps
 
 1. Deploy the fixed `SHELL_TEST` reply, which is already written and tested, to see whether those
-   bots go further when the word comes back. Reinstalling changes the address again, so they may
-   not return.
+   bots go further when the word comes back. Reinstalling can change the address, so they may not
+   return.
 2. Record when each session ends, so time wasted can be measured instead of bounded.
-3. Test the telnet opening on a single address by switching the shell, and with it the opening,
-   off for a day and back on, without reinstalling.
+3. Test the telnet opening directly by switching the shell, and with it the opening, off for a day
+   and back on, without reinstalling. If silent visits rise while it's off and fall again after,
+   the cause is the opening rather than a change in visitors.
 4. Keep collecting until the planned one to two weeks, then report abusive IPs to AbuseIPDB with
    no log contents, as already decided.
 5. Convert the Sigma rules with `sigma-cli` and test all three detections against synthetic
