@@ -107,7 +107,7 @@ could identify this honeypot are replaced with `<id>` and `<name>`. Long lines a
 `…`.
 
 ```text
-# The writable-folder probe. The 6-letter marker is random, with 23 variants seen
+# The writable-folder probe. The 6-letter marker is random, with 25 variants seen
 >/var/run/.x&&cd /var/run;>/mnt/.x&&cd /mnt;…;>/tmp/.x&&cd /tmp;>/var/.x&&cd /var;/bin/busybox echo -e '\x48\x47\x4a\x4e\x4e\x4f'
 
 # BusyBox checks with a made-up "applet", often a botnet's name: SORA, YAKUZA, KYTON, V3G4, Cult, UNSTABLE, HISILICON, BOTNET
