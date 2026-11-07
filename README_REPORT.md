@@ -153,6 +153,31 @@ busybox sh -c 'for p in mirai sora mozi hajime tsunami gafgyt yakuza owari josho
   wanted the word back, but a bot that only checks logins and reports them elsewhere would look the
   same. A fixed reply for that one command is written and tested, but not yet deployed.
 
+## Threat intel: were these IPs already known?
+
+On Nov 7 I checked every IP that visited between Nov 2, when the fake login went live, and Nov 6
+(478 in all, so the 364 above plus the day before the shell) against AbuseIPDB's check API, asking
+for a year of reports. Only the IP addresses were sent, with nothing from the logs, and nothing was
+reported. [analysis/threat_intel_lookup.py](analysis/threat_intel_lookup.py) does the lookups.
+
+- **Almost all were already reported.** 472 of the 478 (99%) had reports from the past year, and
+  417 (87%) had been reported before the honeypot first saw them, a median of 22 days earlier.
+- **New attackers were reported fast.** 3 of the 7 IPs that tried a download had no reports when
+  the honeypot first saw them. Within three days of their first report, they had 1,055 to 5,343
+  each.
+- **Widespread campaigns were known in advance; persistent bots weren't.** Grouping sessions by the
+  exact commands they sent, the three campaigns spread over many IPs came almost entirely from IPs
+  reported before they arrived: the router-CLI and writable-folder probe (25 of 25 IPs), the
+  `enable` … `ping ;sh` opening (36 of 38) and the `HISILICON` BusyBox check (5 of 5). The bots
+  that came back dozens of times from one to three IPs were all new: `uname -m` then `cat /proc`
+  (3 IPs), `echo SHELL_TEST` (3 IPs) and NUL-ended menu words (1 IP). None of those 7 IPs had a
+  report before the honeypot saw them.
+- **Most were on ordinary connections.** 357 of the 478 were on networks AbuseIPDB classes as
+  fixed-line ISPs, the kind that sell home and office broadband, rather than hosting.
+
+AbuseIPDB returns only the past year of reports, so "before" means within that year, and scores
+are as of Nov 7, after these IPs had visited.
+
 ## What defenders should do
 
 Every step of the playbook above depends on something a network owner controls.
@@ -168,6 +193,11 @@ Every step of the playbook above depends on something a network owner controls.
 4. **Alert on new outbound connections from IoT devices.** These devices talk to a small, fixed
    set of servers, so a connection to an unfamiliar address is worth a look, especially within
    minutes of an inbound login. Detection 3 below does this from firewall logs.
+5. **Use IP reputation blocklists, but as one layer, not the defence.** Scored on Nov 7, 301 of the
+   478 IPs (63%) were at 75 or above, so a blocklist at that threshold would catch about 63% of
+   them. The ones it would have missed on arrival were the persistent bots: none of their 7 IPs had
+   any reports until after they reached the honeypot, though all score 100 now. A blocklist only
+   knows yesterday's attackers, so it adds to steps 1 to 4 rather than replacing them.
 
 ## The telnet opening: result and caveat
 
