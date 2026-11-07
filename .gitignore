@@ -11,6 +11,8 @@
 /analysis/figures/
 .ipynb_checkpoints/
 __pycache__/
+# MaxMind's licence doesn't allow sharing GeoLite2 databases. They live in ~/GeoIP, never in git.
+*.mmdb
 
 # Terraform's working files. They name your project and your server's address.
 .terraform/
